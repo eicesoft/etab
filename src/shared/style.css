@@ -117,6 +117,7 @@ input[type='search']:focus {
 
 /* 标签卡 */
 .tab-card {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -138,6 +139,63 @@ input[type='search']:focus {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+}
+
+.tab-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  min-width: 16px;
+  height: 24px;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+  border-radius: 4px;
+}
+
+.tab-drag-handle:hover,
+.tab-drag-handle:focus-visible {
+  color: var(--accent);
+  background: var(--accent-light);
+  outline: none;
+}
+
+.tab-drag-handle:active {
+  cursor: grabbing;
+}
+
+.tab-card.dragging {
+  opacity: 0.45;
+}
+
+.tab-card.drag-target-before,
+.tab-card.drag-target-after {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.tab-card.drag-target-before::before,
+.tab-card.drag-target-after::after {
+  content: '';
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px var(--bg-primary);
+  z-index: 1;
+}
+
+.tab-card.drag-target-before::before {
+  top: -3px;
+}
+
+.tab-card.drag-target-after::after {
+  bottom: -3px;
 }
 
 .tab-card .tab-title {

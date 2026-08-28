@@ -1,5 +1,5 @@
 import { ref, onMounted, onUnmounted } from 'vue'
-import { getAllTabs, formatTabInfo } from './api.js'
+import { getAllTabs, getAllTabGroups, formatTabInfo } from './api.js'
 
 /**
  * 管理标签页状态的 Vue composable
@@ -7,6 +7,7 @@ import { getAllTabs, formatTabInfo } from './api.js'
  */
 export function useTabs() {
   const tabs = ref([])
+  const tabGroups = ref([])
   const loading = ref(true)
   const error = ref(null)
 
@@ -15,8 +16,9 @@ export function useTabs() {
   async function fetchTabs() {
     try {
       loading.value = true
-      const raw = await getAllTabs()
+      const [raw, groups] = await Promise.all([getAllTabs(), getAllTabGroups()])
       tabs.value = raw.map(formatTabInfo)
+      tabGroups.value = groups
       error.value = null
     } catch (e) {
       error.value = e.message
@@ -42,5 +44,5 @@ export function useTabs() {
     }
   })
 
-  return { tabs, loading, error, refresh: fetchTabs }
+  return { tabs, tabGroups, loading, error, refresh: fetchTabs }
 }

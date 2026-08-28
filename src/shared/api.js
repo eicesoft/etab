@@ -12,6 +12,11 @@ export async function getAllTabs() {
   return tabs
 }
 
+/** 获取所有 Chrome 标签组。 */
+export async function getAllTabGroups() {
+  return await chrome.tabGroups.query({})
+}
+
 /**
  * 按窗口分组获取标签页
  * @returns {Promise<{windowId: number, windowName: string, tabs: chrome.tabs.Tab[]}[]>}
@@ -77,6 +82,17 @@ export async function createTab(url, options = {}) {
 }
 
 /**
+ * 将同一窗口内的标签页建立为一个 Chrome 标签组。
+ * @param {number[]} tabIds
+ * @param {string} title
+ */
+export async function createTabGroup(tabIds, title) {
+  const groupId = await chrome.tabs.group({ tabIds })
+  await chrome.tabGroups.update(groupId, { title, color: 'blue', collapsed: false })
+  return groupId
+}
+
+/**
  * 重新加载标签页
  * @param {number} tabId
  */
@@ -112,6 +128,16 @@ export async function duplicateTab(tabId) {
 }
 
 /**
+ * 将标签页移动到指定窗口中的位置
+ * @param {number} tabId
+ * @param {number} windowId
+ * @param {number} index
+ */
+export async function moveTab(tabId, windowId, index) {
+  return await chrome.tabs.move(tabId, { windowId, index })
+}
+
+/**
  * 获取标签页信息并格式化
  * @param {chrome.tabs.Tab} tab
  * @returns {Object}
@@ -129,6 +155,7 @@ export function formatTabInfo(tab) {
     audible: tab.audible || false,
     incognito: tab.incognito,
     index: tab.index,
+    groupId: tab.groupId,
   }
 }
 

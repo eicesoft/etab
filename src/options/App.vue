@@ -21,6 +21,16 @@
 
         <div class="option-item">
           <label>
+            <span>收藏集打开方式</span>
+            <select v-model="settings.collectOpenMode">
+              <option value="group">新建标签组打开</option>
+              <option value="direct">直接打开</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="option-item">
+          <label>
             <input type="checkbox" v-model="settings.showFavicon" />
             <span>Show favicons</span>
           </label>
@@ -70,6 +80,7 @@ import { ref, onMounted } from 'vue'
 
 const DEFAULT_SETTINGS = {
   defaultView: 'window',
+  collectOpenMode: 'group',
   showFavicon: true,
   confirmBeforeClose: false,
 }

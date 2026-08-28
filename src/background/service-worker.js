@@ -29,7 +29,7 @@ chrome.tabs.onCreated.addListener((tab) => {
 })
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url) {
+  if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url || changeInfo.groupId !== undefined) {
     notifyTabChange('updated', tab)
   }
 })
@@ -41,6 +41,16 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
 chrome.tabs.onActivated.addListener((activeInfo) => {
   notifyTabChange('activated', activeInfo)
 })
+
+chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
+  notifyTabChange('moved', { id: tabId, ...moveInfo })
+})
+
+// 标签组的名称、颜色和成员变化同样需要刷新页面展示。
+chrome.tabGroups.onCreated.addListener((group) => notifyTabChange('group-created', group))
+chrome.tabGroups.onUpdated.addListener((group) => notifyTabChange('group-updated', group))
+chrome.tabGroups.onMoved.addListener((group) => notifyTabChange('group-moved', group))
+chrome.tabGroups.onRemoved.addListener((group) => notifyTabChange('group-removed', group))
 
 // 处理来自页面（popup/tabs/options）的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

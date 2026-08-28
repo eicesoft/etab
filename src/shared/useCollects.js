@@ -29,32 +29,33 @@ async function loadCollects() {
  * 迁移旧数据格式：将 tabIds: number[] 转换为 tabs: Array<{id, title, url, favIconUrl}>
  */
 function migrateCollects(list) {
-  let changed = false
-  list = list.map((c) => {
-    if (c.tabIds && Array.isArray(c.tabIds) && !c.tabs) {
+  let changed = !Array.isArray(list)
+  const validCollects = Array.isArray(list) ? list : []
+
+  list = validCollects.reduce((result, collect) => {
+    // 跳过无法渲染、也无法稳定持久化的损坏条目。
+    if (!collect || typeof collect !== 'object' || !collect.id) {
       changed = true
-      return { ...c, tabs: c.tabIds.map((id) => ({ id, title: '标签页 #' + id, url: '', favIconUrl: '' })), tabIds: undefined }
+      return result
     }
-    // 确保有 tabs 字段
-    if (!c.tabs) {
+
+    let tabs = collect.tabs
+    if (!Array.isArray(tabs)) {
       changed = true
-      return { ...c, tabs: [] }
+      tabs = Array.isArray(collect.tabIds)
+        ? collect.tabIds.map((id) => ({ id, title: '标签页 #' + id, url: '', favIconUrl: '' }))
+        : []
     }
-    return c
-  })
+
+    if (collect.tabIds) changed = true
+    result.push({ ...collect, tabs, tabIds: undefined })
+    return result
+  }, [])
   if (changed) {
     // 异步保存，不阻塞
     chrome.storage.local.set({ [STORAGE_KEY]: list }).catch(() => {})
   }
   return list
-}
-
-/**
- * 保存收藏集并更新缓存
- */
-async function saveCollects(list) {
-  cachedCollects = list
-  await chrome.storage.local.set({ [STORAGE_KEY]: list })
 }
 
 /**
@@ -99,13 +100,34 @@ export function useCollects() {
   }
 
   /**
+   * 在所有扩展页面之间串行化收藏集更新：每次都基于存储中的最新数据合并，
+   * 防止独立页面的内存缓存相互覆盖。
+   */
+  async function updateCollects(mutator) {
+    const commit = async () => {
+      const result = await chrome.storage.local.get(STORAGE_KEY)
+      const current = ensureDefault(migrateCollects(result[STORAGE_KEY] || []))
+      const next = mutator(current)
+      cachedCollects = next
+      collects.value = next
+      await chrome.storage.local.set({ [STORAGE_KEY]: next })
+      return next
+    }
+
+    if (globalThis.navigator?.locks?.request) {
+      return globalThis.navigator.locks.request(STORAGE_KEY, { mode: 'exclusive' }, commit)
+    }
+    return commit()
+  }
+
+  /**
    * 创建新收藏集
    */
-  async function addCollect(name) {
-    const list = [...collects.value]
-    list.push({ id: genId(), name, tabs: [] })
-    collects.value = list
-    await saveCollects(list)
+  async function addCollect(name, tabs = []) {
+    const list = await updateCollects((current) => [
+      ...current,
+      { id: genId(), name, tabs },
+    ])
     selectedCollectId.value = list[list.length - 1].id
   }
 
@@ -114,9 +136,7 @@ export function useCollects() {
    */
   async function renameCollect(id, name) {
     if (id === DEFAULT_COLLECT_ID) return
-    const list = collects.value.map((c) => (c.id === id ? { ...c, name } : c))
-    collects.value = list
-    await saveCollects(list)
+    await updateCollects((current) => current.map((c) => (c.id === id ? { ...c, name } : c)))
   }
 
   /**
@@ -124,9 +144,7 @@ export function useCollects() {
    */
   async function removeCollect(id) {
     if (id === DEFAULT_COLLECT_ID) return
-    const list = collects.value.filter((c) => c.id !== id)
-    collects.value = list
-    await saveCollects(list)
+    await updateCollects((current) => current.filter((c) => c.id !== id))
     if (selectedCollectId.value === id) {
       selectedCollectId.value = DEFAULT_COLLECT_ID
     }
@@ -138,30 +156,55 @@ export function useCollects() {
    * @param {{id: number, title: string, url: string, favIconUrl: string}} tabInfo
    */
   async function addTabToCollect(collectId, tabInfo) {
-    const list = collects.value.map((c) => {
+    await updateCollects((current) => current.map((c) => {
       if (c.id === collectId) {
         const exists = c.tabs.some((t) => t.id === tabInfo.id)
         if (exists) return c
         return { ...c, tabs: [...c.tabs, { ...tabInfo }] }
       }
       return c
-    })
-    collects.value = list
-    await saveCollects(list)
+    }))
+  }
+
+  /** 向收藏集批量添加标签页，已存在的标签页会自动跳过。 */
+  async function addTabsToCollect(collectId, tabInfos) {
+    await updateCollects((current) => current.map((collect) => {
+      if (collect.id !== collectId) return collect
+
+      const tabIds = new Set(collect.tabs.map((tab) => tab.id))
+      const newTabs = tabInfos.filter((tab) => !tabIds.has(tab.id))
+      return newTabs.length ? { ...collect, tabs: [...collect.tabs, ...newTabs] } : collect
+    }))
   }
 
   /**
    * 从收藏集移除标签页
    */
   async function removeTabFromCollect(collectId, tabId) {
-    const list = collects.value.map((c) => {
+    await updateCollects((current) => current.map((c) => {
       if (c.id === collectId) {
         return { ...c, tabs: c.tabs.filter((t) => t.id !== tabId) }
       }
       return c
-    })
-    collects.value = list
-    await saveCollects(list)
+    }))
+  }
+
+  /** 调整收藏集中已保存标签页的顺序 */
+  async function moveTabInCollect(collectId, sourceTabId, targetTabId, placeAfter) {
+    await updateCollects((current) => current.map((collect) => {
+      if (collect.id !== collectId) return collect
+
+      const sourceIndex = collect.tabs.findIndex((tab) => tab.id === sourceTabId)
+      const targetIndex = collect.tabs.findIndex((tab) => tab.id === targetTabId)
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return collect
+
+      const reorderedTabs = [...collect.tabs]
+      const [source] = reorderedTabs.splice(sourceIndex, 1)
+      let insertIndex = targetIndex + (placeAfter ? 1 : 0)
+      if (sourceIndex < insertIndex) insertIndex -= 1
+      reorderedTabs.splice(insertIndex, 0, source)
+      return { ...collect, tabs: reorderedTabs }
+    }))
   }
 
   /**
@@ -197,7 +240,9 @@ export function useCollects() {
     renameCollect,
     removeCollect,
     addTabToCollect,
+    addTabsToCollect,
     removeTabFromCollect,
+    moveTabInCollect,
     isDefault,
     getCollectsForTab,
     getAvailableCollects,

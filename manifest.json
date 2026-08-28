@@ -5,6 +5,7 @@
   "description": "A powerful tab management extension",
   "permissions": [
     "tabs",
+    "tabGroups",
     "storage",
     "windows"
   ],
