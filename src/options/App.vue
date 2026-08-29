@@ -4,7 +4,12 @@
       <h1 class="logo">eTab Settings</h1>
     </header>
 
-    <div class="options-content">
+    <div
+      v-motion
+      class="options-content"
+      :initial="{ opacity: 0, y: 8 }"
+      :enter="{ opacity: 1, y: 0, transition: { duration: 180 } }"
+    >
       <!-- 常规设置 -->
       <section class="option-section">
         <h2>General</h2>

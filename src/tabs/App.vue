@@ -18,7 +18,12 @@
       </div>
     </header>
 
-    <div class="main-layout">
+    <div
+      v-motion
+      class="main-layout"
+      :initial="{ opacity: 0, y: 8 }"
+      :enter="{ opacity: 1, y: 0, transition: { duration: 220 } }"
+    >
       <!-- 左侧栏：收藏集列表 -->
       <aside class="sidebar">
         <div class="sidebar-header">
@@ -145,20 +150,18 @@
                   @submit.prevent="saveWindowAsCollect(win)"
                   @click.stop
                 >
-                  <select v-model="windowCollectTargetId" class="window-collect-select" aria-label="选择收藏集">
-                    <option value="">新建收藏集</option>
-                    <option v-for="coll in savableCollects" :key="coll.id" :value="coll.id">{{ coll.name }}</option>
-                  </select>
-                  <input
-                    v-if="!windowCollectTargetId"
-                    v-model="windowCollectName"
-                    class="window-collect-input"
-                    aria-label="收藏集名称"
-                    placeholder="收藏集名称"
-                    autofocus
+                  <NSelect
+                    v-model:value="windowCollectValue"
+                    class="window-collect-select"
+                    :options="collectOptions"
+                    :on-create="createCollectOption"
+                    filterable
+                    tag
+                    placeholder="选择或输入收藏集名称"
+                    aria-label="选择或输入收藏集名称"
                     @keydown.escape="cancelWindowCollect"
                   />
-                  <button class="btn-sm window-collect-confirm" type="submit" title="创建收藏集" aria-label="创建收藏集">✓</button>
+                  <button class="btn-sm window-collect-confirm" type="submit" title="创建或加入收藏集" aria-label="创建或加入收藏集">✓</button>
                   <button class="btn-sm window-collect-cancel" type="button" title="取消" aria-label="取消" @click="cancelWindowCollect">×</button>
                 </form>
                 <button
@@ -376,6 +379,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { NSelect } from 'naive-ui'
 import { useTabs } from '../shared/useTabs.js'
 import { useCollects } from '../shared/useCollects.js'
 import {
@@ -426,8 +430,7 @@ const defaultFavicon = DEFAULT_FAVICON()
 const editingCollectId = ref(null)
 const editingCollectName = ref('')
 const savingWindowId = ref(null)
-const windowCollectName = ref('')
-const windowCollectTargetId = ref('')
+const windowCollectValue = ref(null)
 
 // 拖拽状态
 const dragOverCollectId = ref(null)
@@ -531,6 +534,11 @@ function tabGroupStyle(tab) {
 
 const savableCollects = computed(() => collects.value.filter((collect) => !isDefault(collect.id)))
 
+const collectOptions = computed(() => savableCollects.value.map((collect) => ({
+  label: collect.name,
+  value: `collect:${collect.id}`,
+})))
+
 // ---- 标签页事件 ----
 
 function onFaviconError(e) {
@@ -601,18 +609,17 @@ function startCreateCollect() {
 
 function startWindowCollect(win) {
   savingWindowId.value = win.windowId
-  windowCollectTargetId.value = ''
-  windowCollectName.value = `${win.windowName} 收藏`
+  windowCollectValue.value = null
 }
 
 async function saveWindowAsCollect(win) {
-  const name = windowCollectName.value.trim()
+  const value = windowCollectValue.value
+  if (!value) return
   const snapshots = win.tabs.map(({ id, title, url, favIconUrl }) => ({ id, title, url, favIconUrl }))
-  if (windowCollectTargetId.value) {
-    await addTabsToCollect(windowCollectTargetId.value, snapshots)
+  if (value.startsWith('collect:')) {
+    await addTabsToCollect(value.slice('collect:'.length), snapshots)
   } else {
-    if (!name) return
-    await addCollect(name, snapshots)
+    await addCollect(value.slice('new:'.length), snapshots)
   }
   await Promise.all(win.tabs.map((tab) => closeTabApi(tab.id)))
   await refresh()
@@ -621,8 +628,16 @@ async function saveWindowAsCollect(win) {
 
 function cancelWindowCollect() {
   savingWindowId.value = null
-  windowCollectName.value = ''
-  windowCollectTargetId.value = ''
+  windowCollectValue.value = null
+}
+
+function createCollectOption(label) {
+  const name = label.trim()
+  if (!name) return null
+  const existing = savableCollects.value.find((collect) => collect.name === name)
+  return existing
+    ? { label: existing.name, value: `collect:${existing.id}` }
+    : { label: name, value: `new:${name}` }
 }
 
 function startRename(coll) {
@@ -1119,16 +1134,8 @@ async function onDrop(collectId) {
   gap: 4px;
 }
 
-.window-collect-input {
-  width: 150px;
-  padding: 5px 8px;
-  font-size: 12px;
-}
-
 .window-collect-select {
-  width: 150px;
-  padding: 5px 8px;
-  font-size: 12px;
+  width: 220px;
 }
 
 .window-collect-form .btn-sm {
@@ -1254,7 +1261,7 @@ async function onDrop(collectId) {
 }
 
 .tab-card.is-pinned {
-  background: linear-gradient(90deg, rgba(74, 158, 255, 0.1), var(--bg-card) 36%);
+  background: linear-gradient(90deg, rgba(74, 158, 255, 0.18), var(--bg-card) 42%);
   border-color: rgba(74, 158, 255, 0.42);
   box-shadow: inset 3px 0 0 var(--accent), var(--shadow);
 }
