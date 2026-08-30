@@ -10,17 +10,17 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         { src: 'manifest.json', dest: '.' },
-        { src: 'src/background/service-worker.js', dest: 'src/background' },
+        { src: 'src/background/service-worker.js', dest: 'src/background', rename: { stripBase: true } },
       ],
     }),
   ],
   build: {
     outDir: 'dist',
-    rollupOptions: {
+    rolldownOptions: {
       input: {
-        popup: resolve(__dirname, 'src/popup/index.html'),
-        tabs: resolve(__dirname, 'src/tabs/index.html'),
-        options: resolve(__dirname, 'src/options/index.html'),
+        popup: resolve(import.meta.dirname, 'src/popup/index.html'),
+        tabs: resolve(import.meta.dirname, 'src/tabs/index.html'),
+        options: resolve(import.meta.dirname, 'src/options/index.html'),
       },
     },
   },
