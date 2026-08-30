@@ -109,6 +109,16 @@
           </div>
           <div class="toolbar-actions">
             <button
+              v-if="isDefault(selectedCollectId)"
+              class="btn-primary ai-group-button"
+              type="button"
+              :disabled="aiGrouping || aiGroupingCandidates.length < 2"
+              title="将未分组、未固定的标签标题与 URL 发送至已配置的 AI 服务"
+              @click="groupDefaultTabsWithAi"
+            >
+              {{ aiGrouping ? 'AI 分组中…' : '✨ AI 智能分组' }}
+            </button>
+            <button
               class="btn-ghost"
               :class="{ active: viewMode === 'window' }"
               @click="viewMode = 'window'"
@@ -123,6 +133,13 @@
               📋 平铺列表
             </button>
           </div>
+        </div>
+
+        <div v-if="isDefault(selectedCollectId)" class="ai-grouping-notice">
+          <span>AI 仅整理未分组、未固定的标签；标签标题和 URL 会发送至你配置的 AI 服务。</span>
+          <span v-if="aiGroupingStatus" class="ai-grouping-status" :class="aiGroupingStatus.type" role="status">
+            {{ aiGroupingStatus.message }}
+          </span>
         </div>
 
         <!-- 加载 -->
@@ -374,6 +391,50 @@
         </template>
       </main>
     </div>
+
+    <Teleport to="body">
+      <div v-if="aiModalOpen" class="ai-modal-backdrop" @click.self="closeAiModal">
+        <section class="ai-modal" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title">
+          <header class="ai-modal-header">
+            <div>
+              <span class="ai-modal-eyebrow">ASYNC REQUEST</span>
+              <h2 id="ai-modal-title">AI 智能分组</h2>
+              <p>{{ aiProgressMessage }}</p>
+            </div>
+            <button class="btn-sm ai-modal-close" type="button" :disabled="aiGrouping" aria-label="关闭" @click="closeAiModal">×</button>
+          </header>
+
+          <div class="ai-modal-body">
+            <ol class="ai-progress-steps">
+              <li v-for="step in aiGroupingSteps" :key="step.id" :class="step.state">
+                <span class="ai-step-indicator" aria-hidden="true">{{ step.state === 'done' ? '✓' : step.order }}</span>
+                <span>{{ step.label }}</span>
+              </li>
+            </ol>
+
+            <section class="ai-stream-panel" aria-label="AI 返回数据">
+              <div class="ai-stream-title"><span>AI 返回的 JSON 数据</span><span class="ai-stream-dot" aria-hidden="true"></span></div>
+              <pre>{{ aiStreamContent || '等待模型返回 JSON 数据…' }}</pre>
+            </section>
+
+            <section class="ai-event-panel" aria-label="处理事件">
+              <h3>处理事件</h3>
+              <ul>
+                <li v-for="event in aiEventLog" :key="event.id">
+                  <time>{{ event.time }}</time><span>{{ event.message }}</span>
+                </li>
+              </ul>
+            </section>
+          </div>
+
+          <footer class="ai-modal-footer">
+            <span v-if="aiGroupingStatus" class="ai-grouping-status" :class="aiGroupingStatus.type" role="status">{{ aiGroupingStatus.message }}</span>
+            <button v-else class="btn-ghost" type="button" disabled>处理中…</button>
+            <button v-if="!aiGrouping" class="btn-primary" type="button" @click="closeAiModal">完成</button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -394,6 +455,7 @@ import {
   createTabGroup,
   DEFAULT_FAVICON,
 } from '../shared/api.js'
+import { requestAiTabGroups } from '../shared/aiTabGrouping.js'
 
 const {
   tabs,
@@ -440,6 +502,13 @@ const dragOverTabId = ref(null)
 const dragOverPosition = ref(null)
 const openMenuId = ref(null)
 const selectedTabs = ref(new Map())
+const aiGrouping = ref(false)
+const aiGroupingStatus = ref(null)
+const aiProgressMessage = ref('正在准备需要整理的标签…')
+const aiGroupingSteps = ref([])
+const aiModalOpen = ref(false)
+const aiStreamContent = ref('')
+const aiEventLog = ref([])
 
 onMounted(() => {
   initCollects()
@@ -482,6 +551,8 @@ const displayTabs = computed(() => {
 })
 
 const liveTabsCount = computed(() => tabs.value.length)
+
+const aiGroupingCandidates = computed(() => tabs.value.filter((tab) => tab.groupId === -1 && !tab.pinned))
 
 const totalTabs = computed(() => {
   if (isDefault(selectedCollectId.value)) return tabs.value.length
@@ -564,6 +635,85 @@ async function openCollectInCurrentWindow(coll) {
   if (openMode === 'group' && openedTabs.length > 0) {
     await createTabGroup(openedTabs.map((tab) => tab.id), coll.name)
   }
+}
+
+async function groupDefaultTabsWithAi() {
+  aiGroupingStatus.value = null
+  aiGrouping.value = true
+  aiModalOpen.value = true
+  aiStreamContent.value = ''
+  aiEventLog.value = []
+  aiProgressMessage.value = '正在准备需要整理的标签…'
+  aiGroupingSteps.value = [
+    { id: 'preparing', order: 1, label: '准备标签上下文', state: 'active' },
+    { id: 'requesting', order: 2, label: '请求 AI 生成 JSON 分组方案', state: 'pending' },
+    { id: 'validating', order: 3, label: '校验 AI 返回的数据', state: 'pending' },
+    { id: 'creating', order: 4, label: '创建 Chrome 标签组', state: 'pending' },
+  ]
+  addAiEvent('已开始整理 Default 中的标签。')
+  try {
+    const groups = await requestAiTabGroups(aiGroupingCandidates.value, {
+      onProgress: updateAiGroupingProgress,
+      onResult: handleAiResult,
+    })
+    if (!groups.length) {
+      aiGroupingStatus.value = { type: 'info', message: 'AI 未建议可创建的分组。' }
+      return
+    }
+
+    updateAiGroupingProgress('creating', `正在创建 1/${groups.length} 个 Chrome 标签组…`)
+    for (const [index, group] of groups.entries()) {
+      await createTabGroup(group.tabIds, group.name, group.color)
+      addAiEvent(`已创建「${group.name}」标签组（${group.tabIds.length} 个标签）。`)
+      if (index + 1 < groups.length) {
+        updateAiGroupingProgress('creating', `正在创建 ${index + 2}/${groups.length} 个 Chrome 标签组…`)
+      }
+    }
+    await refresh()
+    aiGroupingSteps.value = aiGroupingSteps.value.map((step) => ({ ...step, state: 'done' }))
+    aiGroupingStatus.value = { type: 'success', message: `已创建 ${groups.length} 个 AI 标签组。` }
+    addAiEvent('标签页已刷新，AI 分组完成。')
+  } catch (error) {
+    aiGroupingStatus.value = { type: 'error', message: error.message || 'AI 分组失败。' }
+    addAiEvent(`处理失败：${error.message || '未知错误'}`)
+  } finally {
+    aiGrouping.value = false
+  }
+}
+
+function updateAiGroupingProgress(stage, message) {
+  const labels = {
+    preparing: '正在准备需要整理的标签…',
+    requesting: 'AI 正在分析标签主题并生成 JSON 分组方案…',
+    validating: '正在验证 AI 返回的 JSON 数据…',
+    creating: '正在创建 Chrome 标签组…',
+  }
+  aiProgressMessage.value = message || labels[stage]
+  const activeIndex = aiGroupingSteps.value.findIndex((step) => step.id === stage)
+  if (activeIndex < 0) return
+  const wasActive = aiGroupingSteps.value[activeIndex].state === 'active'
+  aiGroupingSteps.value = aiGroupingSteps.value.map((step, index) => ({
+    ...step,
+    state: index < activeIndex ? 'done' : index === activeIndex ? 'active' : 'pending',
+  }))
+  if (!wasActive || message) addAiEvent(aiProgressMessage.value)
+}
+
+function handleAiResult(content) {
+  aiStreamContent.value = content
+  addAiEvent('已收到 AI 完整响应，开始解析 JSON。')
+}
+
+function addAiEvent(message) {
+  aiEventLog.value.push({
+    id: `${Date.now()}-${aiEventLog.value.length}`,
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    message,
+  })
+}
+
+function closeAiModal() {
+  if (!aiGrouping.value) aiModalOpen.value = false
 }
 
 async function closeTab(tab) {
@@ -1077,6 +1227,227 @@ async function onDrop(collectId) {
 .toolbar-actions {
   display: flex;
   gap: 4px;
+}
+
+.ai-group-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.ai-grouping-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: -10px 0 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ai-grouping-status {
+  font-weight: 600;
+}
+
+.ai-grouping-status.success {
+  color: #1a9e4a;
+}
+
+.ai-grouping-status.error {
+  color: var(--danger);
+}
+
+.ai-grouping-status.info {
+  color: var(--text-secondary);
+}
+
+.ai-modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(22, 35, 54, 0.36);
+  backdrop-filter: blur(4px);
+}
+
+.ai-modal {
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid rgba(74, 158, 255, 0.46);
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(22, 35, 54, 0.24);
+  animation: ai-modal-enter 0.22s ease-out;
+}
+
+.ai-modal-header,
+.ai-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+}
+
+.ai-modal-header {
+  background: linear-gradient(120deg, var(--accent-light), var(--bg-card) 72%);
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-modal-header h2 {
+  margin-top: 2px;
+  font-size: 18px;
+}
+
+.ai-modal-header p {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.ai-modal-eyebrow {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.ai-modal-close {
+  width: 30px;
+  height: 30px;
+  font-size: 20px;
+}
+
+.ai-modal-body {
+  display: grid;
+  gap: 16px;
+  max-height: calc(min(760px, 100vh - 48px) - 145px);
+  padding: 20px 22px;
+  overflow-y: auto;
+}
+
+.ai-progress-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-progress-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.ai-step-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-card);
+  font-size: 11px;
+}
+
+.ai-progress-steps li.active,
+.ai-progress-steps li.done {
+  color: var(--text-primary);
+}
+
+.ai-progress-steps li.done .ai-step-indicator,
+.ai-progress-steps li.active .ai-step-indicator {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.ai-progress-steps li.active .ai-step-indicator {
+  animation: ai-step-pulse 1.15s ease-in-out infinite;
+}
+
+.ai-stream-panel,
+.ai-event-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.ai-stream-title,
+.ai-event-panel h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ai-stream-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: ai-step-pulse 1.15s ease-in-out infinite;
+}
+
+.ai-stream-panel pre {
+  min-height: 96px;
+  max-height: 190px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: #25405f;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-event-panel ul {
+  display: grid;
+  gap: 8px;
+  max-height: 140px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.ai-event-panel li {
+  display: flex;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ai-event-panel time {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-modal-footer {
+  min-height: 62px;
+  border-top: 1px solid var(--border);
+}
+
+@keyframes ai-modal-enter {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ai-step-pulse {
+  50% { transform: scale(1.13); box-shadow: 0 0 0 5px rgba(74, 158, 255, 0.14); }
 }
 
 .toolbar-actions .btn-ghost.active {

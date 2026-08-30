@@ -9,6 +9,13 @@
     "storage",
     "windows"
   ],
+  "host_permissions": [
+    "https://api.openai.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"

@@ -86,9 +86,9 @@ export async function createTab(url, options = {}) {
  * @param {number[]} tabIds
  * @param {string} title
  */
-export async function createTabGroup(tabIds, title) {
+export async function createTabGroup(tabIds, title, color = 'blue') {
   const groupId = await chrome.tabs.group({ tabIds })
-  await chrome.tabGroups.update(groupId, { title, color: 'blue', collapsed: false })
+  await chrome.tabGroups.update(groupId, { title, color, collapsed: false })
   return groupId
 }
 
