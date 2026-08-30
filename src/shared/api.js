@@ -151,6 +151,24 @@ export async function createTabGroup(tabIds, title, color = 'blue') {
 }
 
 /**
+ * 解散当前所有 Chrome 标签组(同时保留标签页本身,只是从分组里拿出来)。
+ * 静默处理无 tabGroups 权限或不支持的浏览器。
+ * @returns {Promise<number>} 被解散的标签页数量
+ */
+export async function ungroupAllTabs() {
+  if (!chrome?.tabGroups?.query || !chrome?.tabs?.ungroup) return 0
+  const groups = await chrome.tabGroups.query({})
+  if (!groups.length) return 0
+  const tabIdsByGroup = await Promise.all(
+    groups.map((group) => chrome.tabs.query({ groupId: group.id }).then((tabs) => tabs.map((tab) => tab.id)))
+  )
+  const allTabIds = tabIdsByGroup.flat().filter((id) => Number.isInteger(id))
+  if (!allTabIds.length) return 0
+  await chrome.tabs.ungroup(allTabIds)
+  return allTabIds.length
+}
+
+/**
  * 重新加载标签页
  * @param {number} tabId
  */

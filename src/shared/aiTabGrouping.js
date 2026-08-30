@@ -108,11 +108,11 @@ export function validateTabGroups(payload, candidateTabs) {
   for (const item of payload.groups) {
     const ids = [...new Set(Array.isArray(item?.tabIds) ? item.tabIds : [])]
       .filter((id) => Number.isInteger(id) && tabsById.has(id) && !usedIds.has(id))
-    if (ids.length < 2) continue
+    if (ids.length < 4) continue
 
     const windowId = tabsById.get(ids[0]).windowId
     const sameWindowIds = ids.filter((id) => tabsById.get(id).windowId === windowId)
-    if (sameWindowIds.length < 2) continue
+    if (sameWindowIds.length < 4) continue
 
     sameWindowIds.forEach((id) => usedIds.add(id))
     const name = String(item?.name || 'AI 分组').trim().slice(0, 40) || 'AI 分组'
@@ -127,8 +127,10 @@ export function validateTabGroups(payload, candidateTabs) {
 }
 
 function buildPrompt(tabs) {
-  return `你是浏览器标签整理助手。按主题将标签分组；只在同一 windowId 内组合至少 2 个标签。不要创建单标签分组，不要遗漏或编造 tabId。仅返回 JSON，不要 Markdown 或解释，格式必须是：
-{"groups":[{"name":"简短分组名称","color":"blue","tabIds":[101,102]}]}
+  return `你是浏览器标签整理助手。按主题将标签分组；只在同一 windowId 内组合。
+优先合并为少量大组,每个组至少 4 个标签。仅在标签数量足够、主题明确时才新建分组;主题较弱或标签数少于 4 个的标签宁可放弃入组,也不要勉强创建零碎分组。
+不要创建单标签或少于 4 个标签的分组，不要遗漏或编造 tabId。仅返回 JSON，不要 Markdown 或解释，格式必须是：
+{"groups":[{"name":"简短分组名称","color":"blue","tabIds":[101,102,103,104]}]}
 
 可用颜色只能是 grey、blue、red、yellow、green、pink、purple、cyan、orange。
 待整理标签：
@@ -155,7 +157,7 @@ export async function requestAiTabGroups(
   if (!ai?.enabled) throw new Error('请先在设置中启用 AI 助手。')
   if (!apiKey) throw new Error('请先在设置中填写 AI API Key。')
   if (!ai.baseUrl || !ai.model) throw new Error('请先填写 AI API 地址和模型。')
-  if (candidateTabs.length < 2) return []
+  if (candidateTabs.length < 4) return []
 
   const endpoint = chatCompletionsUrl(ai.baseUrl)
   const allowed = await chrome.permissions.contains({ origins: [`${endpoint.origin}/*`] })

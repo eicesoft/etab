@@ -143,11 +143,21 @@
               v-if="isDefault(selectedCollectId)"
               class="btn-primary ai-group-button"
               type="button"
-              :disabled="aiGrouping || aiGroupingCandidates.length < 2"
+              :disabled="aiGrouping || aiGroupingCandidates.length < 4"
               title="将未分组、未固定的标签标题与 URL 发送至已配置的 AI 服务"
               @click="groupDefaultTabsWithAi"
             >
               {{ aiGrouping ? 'AI 分组中…' : '✨ AI 智能分组' }}
+            </button>
+            <button
+              v-if="isDefault(selectedCollectId)"
+              class="btn-ghost ungroup-all-button"
+              type="button"
+              :disabled="ungrouping || groupedTabsCount === 0"
+              :title="groupedTabsCount === 0 ? '当前没有任何标签组' : `一键解散全部 ${groupedTabsCount} 个标签组内的标签`"
+              @click="ungroupAllWithConfirm"
+            >
+              {{ ungrouping ? '正在去除分组…' : '🧹 一键去除分组' }}
             </button>
             <button
               class="btn-ghost"
@@ -589,6 +599,7 @@ import {
   moveTab as moveTabApi,
   createTab,
   createTabGroup,
+  ungroupAllTabs,
   DEFAULT_FAVICON,
   getHostname,
   findDuplicatesByUrl,
@@ -661,6 +672,7 @@ const openMenuId = ref(null)
 const selectedTabs = ref(new Map())
 const aiGrouping = ref(false)
 const aiGroupingStatus = ref(null)
+const ungrouping = ref(false)
 const aiProgressMessage = ref('正在准备需要整理的标签…')
 const aiGroupingSteps = ref([])
 const aiModalOpen = ref(false)
@@ -825,6 +837,7 @@ function onPickRecentSearch(value) {
 }
 
 const aiGroupingCandidates = computed(() => tabs.value.filter((tab) => tab.groupId === -1 && !tab.pinned))
+const groupedTabsCount = computed(() => tabs.value.filter((tab) => tab.groupId !== -1).length)
 
 const totalTabs = computed(() => {
   if (isDefault(selectedCollectId.value)) return tabs.value.length
@@ -1000,6 +1013,55 @@ async function groupDefaultTabsWithAi() {
   } finally {
     aiGrouping.value = false
   }
+}
+
+function ungroupAllWithConfirm() {
+  const count = groupedTabsCount.value
+  if (!count) {
+    message.info('当前没有任何标签组')
+    return
+  }
+  const d = dialog.create({
+    title: '一键去除分组',
+    showIcon: false,
+    closable: true,
+    positiveText: '确定去除',
+    negativeText: '取消',
+    content: `将解散全部 ${count} 个标签组内的标签页（标签页本身不会被关闭）。确定继续吗？`,
+    onPositiveClick: async () => {
+      if (ungrouping.value) return false
+      d.positiveButtonProps = { loading: true }
+      ungrouping.value = true
+      try {
+        const removed = await ungroupAllTabs()
+        await refresh()
+        aiGroupingStatus.value = {
+          type: 'success',
+          message: removed ? `已解散 ${removed} 个标签的分组。` : '当前没有任何标签组。',
+        }
+        message.success(removed ? `已解散 ${removed} 个标签的分组` : '当前没有任何标签组')
+        d.destroy()
+        return true
+      } catch (error) {
+        const text = error?.message || '去除分组失败。'
+        aiGroupingStatus.value = { type: 'error', message: text }
+        message.error(text)
+        d.positiveButtonProps = { loading: false }
+        ungrouping.value = false
+        return false
+      }
+    },
+    onNegativeClick: () => {
+      if (ungrouping.value) return false
+      d.destroy()
+      return true
+    },
+    onClose: () => {
+      if (ungrouping.value) return false
+      d.destroy()
+      return true
+    },
+  })
 }
 
 function updateAiGroupingProgress(stage, message) {
