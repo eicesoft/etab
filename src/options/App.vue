@@ -10,132 +10,131 @@
       :initial="{ opacity: 0, y: 8 }"
       :enter="{ opacity: 1, y: 0, transition: { duration: 180 } }"
     >
-      <!-- 常规设置 -->
-      <section class="option-section">
-        <h2>General</h2>
+      <NTabs v-model:value="activeTab" type="line" animated class="settings-tabs">
+        <NTabPane name="general" tab="常规">
+          <section class="option-section">
+            <div class="option-item">
+              <label>
+                <span>Default view mode</span>
+                <select v-model="settings.defaultView">
+                  <option value="window">Group by Window</option>
+                  <option value="flat">Flat List</option>
+                </select>
+              </label>
+            </div>
 
-        <div class="option-item">
-          <label>
-            <span>Default view mode</span>
-            <select v-model="settings.defaultView">
-              <option value="window">Group by Window</option>
-              <option value="flat">Flat List</option>
-            </select>
-          </label>
-        </div>
+            <div class="option-item">
+              <label>
+                <span>收藏集打开方式</span>
+                <select v-model="settings.collectOpenMode">
+                  <option value="group">新建标签组打开</option>
+                  <option value="direct">直接打开</option>
+                </select>
+              </label>
+            </div>
 
-        <div class="option-item">
-          <label>
-            <span>收藏集打开方式</span>
-            <select v-model="settings.collectOpenMode">
-              <option value="group">新建标签组打开</option>
-              <option value="direct">直接打开</option>
-            </select>
-          </label>
-        </div>
+            <div class="option-item">
+              <label>
+                <input type="checkbox" v-model="settings.showFavicon" />
+                <span>Show favicons</span>
+              </label>
+            </div>
 
-        <div class="option-item">
-          <label>
-            <input type="checkbox" v-model="settings.showFavicon" />
-            <span>Show favicons</span>
-          </label>
-        </div>
+            <div class="option-item">
+              <label>
+                <input type="checkbox" v-model="settings.confirmBeforeClose" />
+                <span>Confirm before closing tabs</span>
+              </label>
+            </div>
+          </section>
+        </NTabPane>
 
-        <div class="option-item">
-          <label>
-            <input type="checkbox" v-model="settings.confirmBeforeClose" />
-            <span>Confirm before closing tabs</span>
-          </label>
-        </div>
-      </section>
+        <NTabPane name="ai" tab="AI 助手">
+          <section class="option-section">
+            <div class="section-heading">
+              <p class="section-description">配置 OpenAI 或兼容服务，用于后续 AI 标签整理功能。</p>
+              <label class="switch-label">
+                <span>启用 AI</span>
+                <input v-model="settings.ai.enabled" type="checkbox" />
+              </label>
+            </div>
 
-      <!-- AI 设置 -->
-      <section class="option-section">
-        <div class="section-heading">
-          <div>
-            <h2>AI 助手</h2>
-            <p class="section-description">配置 OpenAI 或兼容服务，用于后续 AI 标签整理功能。</p>
-          </div>
-          <label class="switch-label">
-            <span>启用 AI</span>
-            <input v-model="settings.ai.enabled" type="checkbox" />
-          </label>
-        </div>
+            <div class="option-item form-item">
+              <label for="ai-api-base-url">API 地址</label>
+              <input
+                id="ai-api-base-url"
+                v-model.trim="settings.ai.baseUrl"
+                type="url"
+                placeholder="https://api.openai.com/v1"
+                autocomplete="url"
+              />
+              <small>可填写 API 根地址（如 https://api.openai.com/v1）或完整 chat/completions 地址。</small>
+            </div>
 
-        <div class="option-item form-item">
-          <label for="ai-api-base-url">API 地址</label>
-          <input
-            id="ai-api-base-url"
-            v-model.trim="settings.ai.baseUrl"
-            type="url"
-            placeholder="https://api.openai.com/v1"
-            autocomplete="url"
-          />
-          <small>可填写 API 根地址（如 https://api.openai.com/v1）或完整 chat/completions 地址。</small>
-        </div>
+            <div class="option-item form-item">
+              <label for="ai-api-key">API Key</label>
+              <div class="secret-input">
+                <input
+                  id="ai-api-key"
+                  v-model="apiKey"
+                  :type="showApiKey ? 'text' : 'password'"
+                  placeholder="sk-..."
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button class="btn-ghost" type="button" @click="showApiKey = !showApiKey">
+                  {{ showApiKey ? '隐藏' : '显示' }}
+                </button>
+              </div>
+              <small>密钥仅保存在此浏览器的本地存储中，不会随 Chrome 同步。</small>
+            </div>
 
-        <div class="option-item form-item">
-          <label for="ai-api-key">API Key</label>
-          <div class="secret-input">
-            <input
-              id="ai-api-key"
-              v-model="apiKey"
-              :type="showApiKey ? 'text' : 'password'"
-              placeholder="sk-..."
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button class="btn-ghost" type="button" @click="showApiKey = !showApiKey">
-              {{ showApiKey ? '隐藏' : '显示' }}
-            </button>
-          </div>
-          <small>密钥仅保存在此浏览器的本地存储中，不会随 Chrome 同步。</small>
-        </div>
+            <div class="form-grid">
+              <div class="option-item form-item">
+                <label for="ai-model">模型</label>
+                <input id="ai-model" v-model.trim="settings.ai.model" type="text" placeholder="gpt-4o-mini" />
+              </div>
+              <div class="option-item form-item">
+                <label for="ai-temperature">创意度</label>
+                <input id="ai-temperature" v-model.number="settings.ai.temperature" type="number" min="0" max="2" step="0.1" />
+              </div>
+              <div class="option-item form-item">
+                <label for="ai-max-tokens">最大输出 Tokens</label>
+                <input id="ai-max-tokens" v-model.number="settings.ai.maxTokens" type="number" min="1" max="16384" step="1" />
+              </div>
+            </div>
 
-        <div class="form-grid">
-          <div class="option-item form-item">
-            <label for="ai-model">模型</label>
-            <input id="ai-model" v-model.trim="settings.ai.model" type="text" placeholder="gpt-4o-mini" />
-          </div>
-          <div class="option-item form-item">
-            <label for="ai-temperature">创意度</label>
-            <input id="ai-temperature" v-model.number="settings.ai.temperature" type="number" min="0" max="2" step="0.1" />
-          </div>
-          <div class="option-item form-item">
-            <label for="ai-max-tokens">最大输出 Tokens</label>
-            <input id="ai-max-tokens" v-model.number="settings.ai.maxTokens" type="number" min="1" max="16384" step="1" />
-          </div>
-        </div>
+            <div class="ai-test-row">
+              <button class="btn-ghost" type="button" :disabled="isTesting" @click="testAiConnection">
+                {{ isTesting ? '测试中…' : '测试 API 连接' }}
+              </button>
+              <span v-if="connectionStatus" class="connection-status" :class="connectionStatus.type" role="status">
+                {{ connectionStatus.message }}
+              </span>
+            </div>
+          </section>
+        </NTabPane>
 
-        <div class="ai-test-row">
-          <button class="btn-ghost" type="button" :disabled="isTesting" @click="testAiConnection">
-            {{ isTesting ? '测试中…' : '测试 API 连接' }}
-          </button>
-          <span v-if="connectionStatus" class="connection-status" :class="connectionStatus.type" role="status">
-            {{ connectionStatus.message }}
-          </span>
-        </div>
-      </section>
+        <NTabPane name="shortcuts" tab="快捷键">
+          <section class="option-section">
+            <p class="text-secondary">
+              You can configure keyboard shortcuts in
+              <code>chrome://extensions/shortcuts</code>
+            </p>
+          </section>
+        </NTabPane>
 
-      <!-- 快捷键 -->
-      <section class="option-section">
-        <h2>Shortcuts</h2>
-        <p class="text-secondary">
-          You can configure keyboard shortcuts in
-          <code>chrome://extensions/shortcuts</code>
-        </p>
-      </section>
-
-      <!-- 关于 -->
-      <section class="option-section">
-        <h2>About</h2>
-        <div class="option-item">
-          <span>eTab v0.1.0</span>
-        </div>
-        <div class="option-item">
-          <span>A powerful tab management extension</span>
-        </div>
-      </section>
+        <NTabPane name="about" tab="关于">
+          <section class="option-section">
+            <div class="option-item">
+              <span>eTab v0.1.0</span>
+            </div>
+            <div class="option-item">
+              <span>A powerful tab management extension</span>
+            </div>
+          </section>
+        </NTabPane>
+      </NTabs>
 
       <!-- 操作按钮 -->
       <div class="option-actions">
@@ -150,6 +149,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { NTabs, NTabPane } from 'naive-ui'
 
 const DEFAULT_SETTINGS = {
   defaultView: 'window',
@@ -173,6 +173,7 @@ function createDefaultSettings() {
 }
 
 const settings = ref(createDefaultSettings())
+const activeTab = ref('general')
 const saved = ref(false)
 const apiKey = ref('')
 const showApiKey = ref(false)
@@ -330,6 +331,14 @@ async function testAiConnection() {
   display: flex;
   flex-direction: column;
   gap: 28px;
+}
+
+.settings-tabs :deep(.n-tabs-nav) {
+  margin-bottom: 4px;
+}
+
+.settings-tabs :deep(.n-tab-pane) {
+  padding-top: 20px;
 }
 
 .option-section {

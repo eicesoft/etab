@@ -4,7 +4,7 @@
       <h1 class="logo">eTab</h1><span class="badge badge-primary">{{ tabs.length }}</span>
       <div class="header-actions">
         <button class="btn-icon" title="打开标签页管理器" aria-label="打开标签页管理器" @click="openTabsPage"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></svg></button>
-        <button class="btn-icon" title="设置" aria-label="设置" @click="openOptions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" /></svg></button>
+        <button class="btn-icon" title="设置" aria-label="设置" @click="openOptions"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg></button>
         <button class="btn-icon" title="刷新" aria-label="刷新" @click="refreshAll"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" /></svg></button>
       </div>
     </header>
@@ -18,9 +18,9 @@
             <svg v-else class="collect-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5c0-1.1.9-2 2-2h4l1.7 2H18.5c1.1 0 2 .9 2 2v7c0 1.1-.9 2-2 2h-13c-1.1 0-2-.9-2-2v-9Z" /><path d="M3.5 10.5h17" /></svg>
             <span class="collect-name" :class="{ 'collect-default-name': panel.isDefault }">{{ panel.name }}</span><span class="collect-count">{{ panel.tabs.length }}</span>
             <span class="collect-actions" @click.stop>
-              <button v-if="!panel.isDefault" title="在当前窗口打开" aria-label="在当前窗口打开" @click="openInCurrentWindow(panel)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M3.5 9h17M10 14h7M14 11l3 3-3 3" /></svg></button>
-              <button v-if="!panel.isDefault" title="在新窗口打开" aria-label="在新窗口打开" @click="openInNewWindow(panel)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="12" height="12" rx="2" /><path d="M8.5 9.5h12v10h-10M16.5 13v5M14 15.5h5" /></svg></button>
-              <button v-if="!panel.isDefault" title="在隐私窗口打开" aria-label="在隐私窗口打开" @click="openInIncognitoWindow(panel)"><svg viewBox="0 0 24 24"><path d="M5 10h14M7 10l1.5-5h7L17 10M6 16a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm6 0h6M15 16a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" /></svg></button>
+              <button v-if="!panel.isDefault" title="在当前窗口打开" aria-label="在当前窗口打开" @click="openInCurrentWindow(panel)"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2.5" /><path d="M9 12h6M12 9v6" /></svg></button>
+              <button v-if="!panel.isDefault" title="在新窗口打开" aria-label="在新窗口打开" @click="openInNewWindow(panel)"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="11" height="11" rx="2" /><rect x="9.5" y="9.5" width="11" height="11" rx="2" /></svg></button>
+              <button v-if="!panel.isDefault" title="在隐私窗口打开" aria-label="在隐私窗口打开" @click="openInIncognitoWindow(panel)"><svg viewBox="0 0 24 24"><path d="M3 13h18" /><path d="M6 13a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4" /><circle cx="9" cy="16.5" r="1.4" /><circle cx="15" cy="16.5" r="1.4" /></svg></button>
             </span>
           </div>
         </template>
