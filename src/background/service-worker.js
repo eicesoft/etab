@@ -10,6 +10,11 @@ chrome.runtime.onInstalled.addListener((details) => {
   } else if (details.reason === 'update') {
     console.log('eTab updated')
   }
+  scheduleBadgeUpdate()
+})
+
+chrome.runtime.onStartup.addListener(() => {
+  scheduleBadgeUpdate()
 })
 
 // 监听标签页变化，广播给所有页面
@@ -26,31 +31,72 @@ function notifyTabChange(action, tabInfo) {
 
 chrome.tabs.onCreated.addListener((tab) => {
   notifyTabChange('created', tab)
+  scheduleBadgeUpdate()
 })
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url || changeInfo.groupId !== undefined) {
     notifyTabChange('updated', tab)
+    scheduleBadgeUpdate()
   }
 })
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
   notifyTabChange('removed', { id: tabId, windowId: removeInfo.windowId })
+  scheduleBadgeUpdate()
 })
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
   notifyTabChange('activated', activeInfo)
+  scheduleBadgeUpdate()
 })
 
 chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
   notifyTabChange('moved', { id: tabId, ...moveInfo })
+  scheduleBadgeUpdate()
 })
 
+chrome.tabs.onAttached.addListener(() => scheduleBadgeUpdate())
+chrome.tabs.onDetached.addListener(() => scheduleBadgeUpdate())
+
 // 标签组的名称、颜色和成员变化同样需要刷新页面展示。
-chrome.tabGroups.onCreated.addListener((group) => notifyTabChange('group-created', group))
+chrome.tabGroups.onCreated.addListener((group) => {
+  notifyTabChange('group-created', group)
+  scheduleBadgeUpdate()
+})
 chrome.tabGroups.onUpdated.addListener((group) => notifyTabChange('group-updated', group))
 chrome.tabGroups.onMoved.addListener((group) => notifyTabChange('group-moved', group))
-chrome.tabGroups.onRemoved.addListener((group) => notifyTabChange('group-removed', group))
+chrome.tabGroups.onRemoved.addListener((group) => {
+  notifyTabChange('group-removed', group)
+  scheduleBadgeUpdate()
+})
+
+// ---- 图标角标 ----
+
+let badgeUpdateTimer = null
+
+function scheduleBadgeUpdate() {
+  if (badgeUpdateTimer) return
+  badgeUpdateTimer = setTimeout(async () => {
+    badgeUpdateTimer = null
+    try {
+      const all = await chrome.tabs.query({})
+      const text = String(all.length)
+      await chrome.action.setBadgeText({ text })
+      await chrome.action.setBadgeBackgroundColor({ color: '#4a9eff' })
+    } catch (e) {
+      // 忽略：扩展权限未就绪
+    }
+  }, 200)
+}
+
+// ---- 快捷键 ----
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'open-tabs-manager') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('src/tabs/index.html') })
+  }
+})
 
 // 处理来自页面（popup/tabs/options）的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

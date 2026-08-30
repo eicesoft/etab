@@ -9,6 +9,17 @@
       </div>
     </header>
     <div class="search-bar"><input v-model="searchQuery" type="search" placeholder="搜索标签页..." /></div>
+    <NSelect
+      v-if="recentSearches.length"
+      class="recent-search-select"
+      :value="null"
+      :options="recentSearchOptions"
+      placeholder="最近搜索…"
+      size="tiny"
+      filterable
+      clearable
+      @update:value="onPickRecentSearch"
+    />
     <div v-if="pageLoading" class="loading-spinner">加载中...</div>
     <NCollapse v-else v-model:expanded-names="expandedCollectIds" class="collect-collapse">
       <NCollapseItem v-for="panel in collectPanels" :key="panel.id" :name="panel.id">
@@ -28,7 +39,8 @@
           <NTooltip v-for="tab in panel.tabs" :key="tab.id" placement="bottom" :delay="300">
             <template #trigger>
               <button class="tab-icon-button" :class="{ 'is-pinned': tab.pinned }" :aria-label="tab.title" @click="panel.isDefault ? activateTab(tab) : openSavedTab(tab)" @contextmenu.prevent.stop="openContextMenu($event, tab, panel)">
-                <img :src="tab.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                <img v-if="settings.showFavicon" :src="tab.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                <span v-else class="tab-icon-monogram" aria-hidden="true">{{ faviconMonogram(tab) }}</span>
               </button>
             </template>
             <div class="tab-tooltip"><strong>{{ tab.title }}</strong><span>{{ tab.url }}</span></div>
@@ -65,14 +77,18 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NCollapse, NCollapseItem, NTooltip, useMessage } from 'naive-ui'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { NCollapse, NCollapseItem, NSelect, NTooltip, useMessage } from 'naive-ui'
 import { useTabs } from '../shared/useTabs.js'
 import { useCollects } from '../shared/useCollects.js'
+import { useSettings } from '../shared/useSettings.js'
+import { useRecentSearches } from '../shared/useRecentSearches.js'
 import { closeTab, createTab, createTabGroup, DEFAULT_FAVICON, duplicateTab, muteTab, pinTab } from '../shared/api.js'
 
 const { tabs, loading: tabsLoading, refresh } = useTabs()
 const { collects, loading: collectsLoading, init, isDefault, getAvailableCollects, addTabToCollect, removeTabFromCollect, DEFAULT_COLLECT_ID } = useCollects()
+const { settings, init: initSettings, watchStorage, unwatchStorage, confirmClose } = useSettings()
+const { recent: recentSearches, init: initRecentSearches, pushQuery: pushRecentQuery } = useRecentSearches('popup')
 const searchQuery = ref('')
 const expandedCollectIds = ref([DEFAULT_COLLECT_ID])
 const defaultFavicon = DEFAULT_FAVICON()
@@ -81,6 +97,17 @@ const pageLoading = computed(() => tabsLoading.value || collectsLoading.value)
 
 const contextMenu = ref({ visible: false, x: 0, y: 0, tab: null, isDefault: false, collectId: null })
 const menuRef = ref(null)
+
+let searchPushTimer = null
+watch(searchQuery, (value) => {
+  clearTimeout(searchPushTimer)
+  if (!value || !value.trim()) return
+  searchPushTimer = setTimeout(() => pushRecentQuery(value), 600)
+})
+const recentSearchOptions = computed(() => recentSearches.value.map((q) => ({ label: q, value: q })))
+function onPickRecentSearch(value) {
+  if (typeof value === 'string') searchQuery.value = value
+}
 const toast = ref('')
 let toastTimer = null
 
@@ -88,8 +115,9 @@ const menuCollects = computed(() =>
   contextMenu.value.isDefault && contextMenu.value.tab ? getAvailableCollects(contextMenu.value.tab.id) : []
 )
 
-onMounted(() => {
-  init()
+onMounted(async () => {
+  await Promise.all([init(), initSettings(), initRecentSearches()])
+  watchStorage()
   document.addEventListener('click', closeContextMenu)
   document.addEventListener('contextmenu', closeContextMenu)
   document.addEventListener('keydown', onKeydown)
@@ -98,6 +126,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', closeContextMenu)
   document.removeEventListener('contextmenu', closeContextMenu)
   document.removeEventListener('keydown', onKeydown)
+  unwatchStorage()
 })
 
 const collectPanels = computed(() => collects.value.map((collect) => {
@@ -108,6 +137,15 @@ const collectPanels = computed(() => collects.value.map((collect) => {
 }))
 
 function onFaviconError(event) { event.target.src = defaultFavicon }
+
+function faviconMonogram(tab) {
+  const source = (tab?.title || tab?.url || '').trim()
+  if (!source) return '•'
+  const code = source.codePointAt(0)
+  if (!code) return '•'
+  const ch = String.fromCodePoint(code).toUpperCase()
+  return /[A-Z0-9]/.test(ch) ? ch : '•'
+}
 async function refreshAll() { await Promise.all([refresh(), init()]) }
 async function activateTab(tab) {
   try { await chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB', tabId: tab.id, windowId: tab.windowId }) }
@@ -145,14 +183,19 @@ async function duplicateCurrentTab() {
 }
 
 async function closeCurrentTab() {
+  if (!confirmClose(contextMenu.value.tab)) return
   await closeTab(contextMenu.value.tab.id)
   await refresh()
 }
 
 async function addCurrentTabToCollect(coll) {
   const tab = contextMenu.value.tab
-  await addTabToCollect(coll.id, { id: tab.id, title: tab.title, url: tab.url, favIconUrl: tab.favIconUrl })
-  showToast(`已加入「${coll.name}」`)
+  const result = await addTabToCollect(coll.id, { id: tab.id, title: tab.title, url: tab.url, favIconUrl: tab.favIconUrl })
+  if (result.skipped > 0) {
+    showToast(`「${coll.name}」已存在该链接`)
+  } else {
+    showToast(`已加入「${coll.name}」`)
+  }
 }
 
 async function copySavedTabUrl() {
@@ -225,6 +268,20 @@ function openOptions() { chrome.runtime.openOptionsPage(); window.close() }
 .collect-collapse :deep(.n-collapse-item__header) { min-height: 42px; padding: 0 4px; }.collect-collapse :deep(.n-collapse-item__header-main) { display: flex; align-items: center; min-width: 0; }.collect-collapse :deep(.n-collapse-item__content-inner) { padding: 8px 10px 10px; background: var(--bg-card); }
 .collect-header { width: 100%; min-height: 42px; }.collect-icon { width: 17px; height: 17px; flex-shrink: 0; fill: none; stroke: var(--text-secondary); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }.collect-name { min-width: 0; max-width: 155px; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.collect-default-name { color: #6b7280; }.collect-count { flex-shrink: 0; padding: 1px 6px; border-radius: 9px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; }.collect-actions { display: inline-flex; margin-left: auto; gap: 2px; }.collect-actions button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-secondary); }.collect-actions button:hover { background: var(--accent-light); color: var(--accent); }.collect-actions svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .tab-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 6px; }.tab-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 2px; background: var(--bg-secondary); }.tab-icon-button.is-pinned { border-color: #86bcf7; background: #cfe5ff; box-shadow: inset 2px 0 0 var(--accent); }.tab-icon-button:hover { border-color: var(--accent); background: var(--accent-light); transform: translateY(-1px); }.tab-icon-button img { width: 18px; height: 18px; }
+.recent-search-select { width: 100%; }
+.tab-icon-monogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
 .tab-tooltip { display: flex; max-width: 240px; flex-direction: column; gap: 3px; }.tab-tooltip strong, .tab-tooltip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.tab-tooltip span, .empty-collect { color: var(--text-secondary); font-size: 11px; }.empty-collect { margin: 0; padding: 4px 0; }
 .context-menu { position: fixed; z-index: 3000; min-width: 168px; max-height: 60vh; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1); padding: 4px; }
 .context-menu button { display: block; width: 100%; padding: 6px 12px; font-size: 12px; text-align: left; border: 0; background: none; border-radius: 4px; cursor: pointer; }

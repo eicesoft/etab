@@ -72,6 +72,64 @@ export async function closeTabs(tabIds) {
 }
 
 /**
+ * 关闭与指定 hostname 匹配的所有标签页。
+ * @param {string} hostname - 例如 "github.com"
+ * @param {{windowId?: number}} [options] - 限定窗口
+ * @returns {Promise<chrome.tabs.Tab[]>} 被关闭的标签页
+ */
+export async function closeTabsByDomain(hostname, { windowId } = {}) {
+  if (!hostname) return []
+  const target = hostname.toLowerCase()
+  const tabs = await chrome.tabs.query(windowId ? { windowId } : {})
+  const matching = tabs.filter((tab) => {
+    if (!tab.url) return false
+    try {
+      return new URL(tab.url).hostname.toLowerCase() === target
+    } catch {
+      return false
+    }
+  })
+  if (matching.length) {
+    await chrome.tabs.remove(matching.map((tab) => tab.id))
+  }
+  return matching
+}
+
+/**
+ * 提取 tab 的 hostname（用于显示与分组），无法解析时返回空串。
+ * @param {string} url
+ * @returns {string}
+ */
+export function getHostname(url) {
+  if (!url) return ''
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 查找跨窗口的重复标签页。
+ * 归一化规则:去除 hash 与 query 后按 url 精确匹配,保留至少 2 个 tab 的组。
+ * @returns {Promise<Array<{url: string, tabs: chrome.tabs.Tab[]}>>}
+ */
+export async function findDuplicatesByUrl() {
+  const tabs = await chrome.tabs.query({})
+  const groups = new Map()
+  for (const tab of tabs) {
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) continue
+    const key = tab.url.replace(/#.*$/, '').replace(/\?.*$/, '')
+    if (!key) continue
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(tab)
+  }
+  return [...groups.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([url, tabs]) => ({ url, tabs }))
+}
+
+/**
  * 创建新标签页
  * @param {string} url
  * @param {Object} [options]

@@ -33,6 +33,15 @@
   "chrome_url_overrides": {
     "newtab": "src/tabs/index.html"
   },
+  "commands": {
+    "open-tabs-manager": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      },
+      "description": "打开 eTab 标签管理器"
+    }
+  },
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

@@ -28,7 +28,22 @@
       <aside class="sidebar">
         <div class="sidebar-header">
           <span class="sidebar-title">收藏集</span>
-          <button class="btn-sm" title="新建收藏集" @click="startCreateCollect">+</button>
+          <div class="sidebar-header-actions">
+            <button
+              class="btn-sm"
+              title="导入收藏集 (JSON)"
+              aria-label="导入收藏集"
+              @click="triggerImport"
+            >↥</button>
+            <button class="btn-sm" title="新建收藏集" @click="startCreateCollect">+</button>
+          </div>
+          <input
+            ref="importInputEl"
+            type="file"
+            accept="application/json,.json"
+            class="visually-hidden"
+            @change="onImportFile"
+          />
         </div>
         <div class="collect-list">
           <div
@@ -77,7 +92,9 @@
                 title="在当前窗口打开"
                 aria-label="在当前窗口打开"
                 @click="openCollectInCurrentWindow(coll)"
-              >↗</button>
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5" /><path d="M9 12h6M12 9v6" /></svg>
+              </button>
               <div class="dropdown">
                 <button
                   class="btn-sm btn-more"
@@ -87,6 +104,9 @@
                 >⋮</button>
                 <div class="dropdown-menu" :class="{ 'is-open': openMenuId === `collect-${coll.id}` }" @click.stop="closeMenu">
                   <button @click="startRename(coll)">重命名</button>
+                  <button @click="onExportCollect(coll)">导出 JSON</button>
+                  <button @click="onMergeCollect(coll)">合并到…</button>
+                  <button @click="onDedupCollect(coll)">去重 (按 URL)</button>
                   <div class="dropdown-divider"></div>
                   <button class="danger" @click="confirmDelete(coll)">删除收藏集</button>
                 </div>
@@ -105,6 +125,17 @@
               v-model="searchQuery"
               type="search"
               placeholder="搜索标签页标题或 URL..."
+            />
+            <NSelect
+              v-if="recentSearches.length"
+              class="recent-search-select"
+              :value="null"
+              :options="recentSearchOptions"
+              placeholder="最近搜索…"
+              size="tiny"
+              filterable
+              clearable
+              @update:value="onPickRecentSearch"
             />
           </div>
           <div class="toolbar-actions">
@@ -218,7 +249,8 @@
                     :title="isTabSelected(tab, DEFAULT_COLLECT_ID) ? '取消选择' : '选择标签页'"
                     @click.stop="toggleTabSelection(tab, DEFAULT_COLLECT_ID)"
                   >
-                    <img class="favicon" :src="tab.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                    <img v-if="settings.showFavicon" class="favicon" :src="tab.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                    <span v-else class="tab-favicon-monogram" aria-hidden="true">{{ faviconMonogram(tab) }}</span>
                     <span class="tab-select-checkbox" aria-hidden="true">✓</span>
                   </button>
                   <div class="tab-body">
@@ -232,6 +264,7 @@
                     <span v-if="tab.pinned" class="tab-pinned-indicator" title="已固定标签页" aria-label="已固定标签页">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6M10 4v5l-2 3h8l-2-3V4M12 12v8" /></svg>
                     </span>
+                    <span v-if="duplicateCount(tab) > 1" class="dup-badge" :title="`该 URL 已打开 ${duplicateCount(tab)} 次`">重复 ×{{ duplicateCount(tab) }}</span>
                     <span v-if="tab.active" class="badge badge-primary">当前</span>
                   </div>
                   <div class="tab-actions">
@@ -242,6 +275,8 @@
                         <button @click="pinTab(tab)">{{ tab.pinned ? '取消固定' : '固定标签页' }}</button>
                         <button @click="muteTab(tab)">{{ tab.muted ? '取消静音' : '静音标签页' }}</button>
                         <button @click="duplicateTab(tab)">复制标签页</button>
+                        <button v-if="getHostname(tab.url)" @click="closeByDomainOf(tab)">关闭 {{ getHostname(tab.url) }} 所有标签页</button>
+                        <button v-if="duplicateCount(tab) > 1" @click="closeDuplicatesOf(tab)">关闭重复的 {{ duplicateCount(tab) - 1 }} 个</button>
                         <div class="dropdown-divider"></div>
                         <button
                           v-for="coll in getAvailableCollects(tab.id)"
@@ -291,7 +326,8 @@
                   :title="isTabSelected(tab, DEFAULT_COLLECT_ID) ? '取消选择' : '选择标签页'"
                   @click.stop="toggleTabSelection(tab, DEFAULT_COLLECT_ID)"
                 >
-                  <img class="favicon" :src="tab.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                  <img v-if="settings.showFavicon" class="favicon" :src="tab.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                  <span v-else class="tab-favicon-monogram" aria-hidden="true">{{ faviconMonogram(tab) }}</span>
                   <span class="tab-select-checkbox" aria-hidden="true">✓</span>
                 </button>
                 <div class="tab-body">
@@ -305,6 +341,7 @@
                     <span v-if="tab.pinned" class="tab-pinned-indicator" title="已固定标签页" aria-label="已固定标签页">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6M10 4v5l-2 3h8l-2-3V4M12 12v8" /></svg>
                     </span>
+                    <span v-if="duplicateCount(tab) > 1" class="dup-badge" :title="`该 URL 已打开 ${duplicateCount(tab)} 次`">重复 ×{{ duplicateCount(tab) }}</span>
                     <span v-if="tab.active" class="badge badge-primary">当前</span>
                   </div>
                 <div class="tab-actions">
@@ -315,6 +352,8 @@
                       <button @click="pinTab(tab)">{{ tab.pinned ? '取消固定' : '固定标签页' }}</button>
                       <button @click="muteTab(tab)">{{ tab.muted ? '取消静音' : '静音标签页' }}</button>
                       <button @click="duplicateTab(tab)">复制标签页</button>
+                      <button v-if="getHostname(tab.url)" @click="closeByDomainOf(tab)">关闭 {{ getHostname(tab.url) }} 所有标签页</button>
+                      <button v-if="duplicateCount(tab) > 1" @click="closeDuplicatesOf(tab)">关闭重复的 {{ duplicateCount(tab) - 1 }} 个</button>
                       <div class="dropdown-divider"></div>
                       <button
                         v-for="coll in getAvailableCollects(tab.id)"
@@ -337,6 +376,32 @@
         <template v-else>
           <div class="saved-tabs-header">
             <span class="saved-tabs-title">收藏集「{{ selectedCollect.name }}」— {{ selectedCollect.tabs.length }} 个标签页</span>
+            <div class="saved-tabs-actions" @click.stop>
+              <button
+                class="btn-sm"
+                title="在当前窗口打开"
+                aria-label="在当前窗口打开"
+                @click="openCollectInCurrentWindow(selectedCollect)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5" /><path d="M9 12h6M12 9v6" /></svg>
+              </button>
+              <button
+                class="btn-sm"
+                title="在新窗口打开"
+                aria-label="在新窗口打开"
+                @click="openCollectInNewWindow(selectedCollect)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="11" height="11" rx="2" /><rect x="9.5" y="9.5" width="11" height="11" rx="2" /></svg>
+              </button>
+              <button
+                class="btn-sm"
+                title="在隐私窗口打开"
+                aria-label="在隐私窗口打开"
+                @click="openCollectInIncognitoWindow(selectedCollect)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h18" /><path d="M6 13a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4" /><circle cx="9" cy="16.5" r="1.4" /><circle cx="15" cy="16.5" r="1.4" /></svg>
+              </button>
+            </div>
           </div>
           <div class="tab-grid">
             <div
@@ -367,7 +432,8 @@
                 :title="isTabSelected(stored, selectedCollectId) ? '取消选择' : '选择标签页'"
                 @click.stop="toggleTabSelection(stored, selectedCollectId)"
               >
-                <img class="favicon" :src="stored.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                <img v-if="settings.showFavicon" class="favicon" :src="stored.favIconUrl || defaultFavicon" alt="" @error="onFaviconError" />
+                <span v-else class="tab-favicon-monogram" aria-hidden="true">{{ faviconMonogram(stored) }}</span>
                 <span class="tab-select-checkbox" aria-hidden="true">✓</span>
               </button>
               <div class="tab-body">
@@ -448,17 +514,74 @@
         </section>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <Transition name="bar-slide">
+        <div v-if="selectedTabs.size > 0" class="bulk-bar" role="toolbar" aria-label="批量操作">
+          <span class="bulk-bar-count">已选 {{ selectedTabs.size }}</span>
+          <div class="bulk-bar-divider"></div>
+          <button
+            v-if="selectedFromDefault.length"
+            class="btn-sm bulk-bar-btn danger"
+            type="button"
+            :title="`关闭 ${selectedFromDefault.length} 个实时标签页`"
+            @click="bulkCloseSelected"
+          >关闭 {{ selectedFromDefault.length }}</button>
+          <button
+            v-if="selectedFromCollects.length"
+            class="btn-sm bulk-bar-btn danger"
+            type="button"
+            :title="`从收藏集移出 ${selectedFromCollects.length} 个标签`"
+            @click="bulkRemoveFromCollect"
+          >移出 {{ selectedFromCollects.length }}</button>
+          <template v-if="selectedFromDefault.length">
+            <button
+              class="btn-sm bulk-bar-btn"
+              type="button"
+              :title="allPinned ? '取消固定' : '固定标签页'"
+              @click="bulkPinSelected(!allPinned)"
+            >{{ allPinned ? '取消固定' : '固定' }} {{ selectedFromDefault.length }}</button>
+            <button
+              class="btn-sm bulk-bar-btn"
+              type="button"
+              :title="allMuted ? '取消静音' : '静音标签页'"
+              @click="bulkMuteSelected(!allMuted)"
+            >{{ allMuted ? '取消静音' : '静音' }} {{ selectedFromDefault.length }}</button>
+          </template>
+          <NSelect
+            v-if="selectedFromCollects.length && collectMoveOptions.length"
+            class="bulk-bar-select"
+            :value="null"
+            :options="collectMoveOptions"
+            placeholder="移动到收藏集…"
+            size="small"
+            filterable
+            @update:value="onBulkMoveSelected"
+          />
+          <div class="bulk-bar-divider"></div>
+          <button
+            class="btn-sm bulk-bar-btn"
+            type="button"
+            title="取消选择"
+            @click="clearTabSelection"
+          >取消</button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { NSelect } from 'naive-ui'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, h } from 'vue'
+import { NSelect, useDialog, useMessage } from 'naive-ui'
 import { useTabs } from '../shared/useTabs.js'
 import { useCollects } from '../shared/useCollects.js'
+import { useSettings } from '../shared/useSettings.js'
+import { useRecentSearches } from '../shared/useRecentSearches.js'
 import {
   activateTab as activateTabApi,
   closeTab as closeTabApi,
+  closeTabsByDomain,
   reloadTab as reloadTabApi,
   pinTab as pinTabApi,
   muteTab as muteTabApi,
@@ -467,6 +590,8 @@ import {
   createTab,
   createTabGroup,
   DEFAULT_FAVICON,
+  getHostname,
+  findDuplicatesByUrl,
 } from '../shared/api.js'
 import { requestAiTabGroups } from '../shared/aiTabGrouping.js'
 
@@ -490,10 +615,19 @@ const {
   addTabsToCollect,
   removeTabFromCollect,
   moveTabInCollect,
+  dedupByUrl,
+  exportCollect,
+  importCollect,
+  mergeCollect,
   isDefault,
   getAvailableCollects,
   DEFAULT_COLLECT_ID,
 } = useCollects()
+
+const { settings, init: initSettings, watchStorage, unwatchStorage, confirmClose } = useSettings()
+const dialog = useDialog()
+const message = useMessage()
+const { recent: recentSearches, init: initRecentSearches, pushQuery: pushRecentQuery } = useRecentSearches('tabs')
 
 const pageLoading = computed(() => tabsLoading.value || collectsLoading.value)
 
@@ -501,11 +635,21 @@ const searchQuery = ref('')
 const viewMode = ref('window')
 const defaultFavicon = DEFAULT_FAVICON()
 
+// 跟 settings.defaultView 双向同步:初始化与跨页变更都生效
+watch(
+  () => settings.value.defaultView,
+  (value) => {
+    if (value === 'flat' || value === 'window') viewMode.value = value
+  },
+  { immediate: true }
+)
+
 // 编辑收藏集状态
 const editingCollectId = ref(null)
 const editingCollectName = ref('')
 const savingWindowId = ref(null)
 const windowCollectValue = ref(null)
+const importInputEl = ref(null)
 
 // 拖拽状态
 const dragOverCollectId = ref(null)
@@ -567,13 +711,15 @@ watch([aiStreamContent, aiTypedText, aiReasoningTypedText], async () => {
   if (reasoningPreEl.value) reasoningPreEl.value.scrollTop = reasoningPreEl.value.scrollHeight
 })
 
-onMounted(() => {
-  initCollects()
+onMounted(async () => {
+  await Promise.all([initCollects(), initSettings(), initRecentSearches()])
+  watchStorage()
   document.addEventListener('click', closeMenu)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeMenu)
+  unwatchStorage()
   stopTypewriter()
 })
 
@@ -609,6 +755,74 @@ const displayTabs = computed(() => {
 })
 
 const liveTabsCount = computed(() => tabs.value.length)
+
+// URL 重复计数（仅对实时标签页）：key = url 去掉 hash 和 query
+const duplicateCountByUrl = computed(() => {
+  const counts = new Map()
+  for (const tab of tabs.value) {
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) continue
+    const key = tab.url.replace(/#.*$/, '').replace(/\?.*$/, '')
+    if (!key) continue
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  return counts
+})
+
+function duplicateCount(tab) {
+  if (!tab?.url) return 0
+  const key = tab.url.replace(/#.*$/, '').replace(/\?.*$/, '')
+  return duplicateCountByUrl.value.get(key) || 0
+}
+
+function duplicateGroupOf(tab) {
+  if (!tab?.url) return []
+  const key = tab.url.replace(/#.*$/, '').replace(/\?.*$/, '')
+  if ((duplicateCountByUrl.value.get(key) || 0) < 2) return []
+  return tabs.value.filter((t) => {
+    if (!t.url) return false
+    return t.url.replace(/#.*$/, '').replace(/\?.*$/, '') === key
+  })
+}
+
+async function closeDuplicatesOf(tab) {
+  const group = duplicateGroupOf(tab)
+  if (group.length < 2) return
+  // 保留第一个（按 tabs.value 顺序）
+  const [, ...toClose] = group
+  if (settings.value.confirmBeforeClose) {
+    if (!window.confirm(`关闭 ${toClose.length} 个重复标签？保留 1 个。`)) return
+  }
+  for (const t of toClose) {
+    try { await closeTabApi(t.id) } catch { /* 可能已关闭 */ }
+  }
+  message.success(`已关闭 ${toClose.length} 个重复标签`)
+}
+
+async function closeByDomainOf(tab) {
+  const host = getHostname(tab.url)
+  if (!host) {
+    message.info('该标签页没有可识别的域名')
+    return
+  }
+  const closing = await closeTabsByDomain(host, { windowId: tab.windowId })
+  message.success(closing.length ? `已关闭 ${closing.length} 个 ${host} 标签` : `未找到更多 ${host} 标签`)
+}
+
+// 防抖记录最近搜索
+let searchPushTimer = null
+watch(searchQuery, (value) => {
+  clearTimeout(searchPushTimer)
+  if (!value || !value.trim()) return
+  searchPushTimer = setTimeout(() => pushRecentQuery(value), 600)
+})
+
+const recentSearchOptions = computed(() => recentSearches.value.map((q) => ({ label: q, value: q })))
+
+function onPickRecentSearch(value) {
+  if (typeof value === 'string') {
+    searchQuery.value = value
+  }
+}
 
 const aiGroupingCandidates = computed(() => tabs.value.filter((tab) => tab.groupId === -1 && !tab.pinned))
 
@@ -674,6 +888,15 @@ function onFaviconError(e) {
   e.target.src = defaultFavicon
 }
 
+function faviconMonogram(tab) {
+  const source = (tab?.title || tab?.url || '').trim()
+  if (!source) return '•'
+  const code = source.codePointAt(0)
+  if (!code) return '•'
+  const ch = String.fromCodePoint(code).toUpperCase()
+  return /[A-Z0-9]/.test(ch) ? ch : '•'
+}
+
 async function activateTab(tab) {
   await activateTabApi(tab.id, tab.windowId)
 }
@@ -692,6 +915,40 @@ async function openCollectInCurrentWindow(coll) {
 
   if (openMode === 'group' && openedTabs.length > 0) {
     await createTabGroup(openedTabs.map((tab) => tab.id), coll.name)
+  }
+}
+
+async function openCollectInNewWindow(coll) {
+  if (!coll.tabs.length) {
+    message.info('该收藏集暂无标签页')
+    return
+  }
+  const result = await chrome.storage.sync.get('settings')
+  const openMode = result.settings?.collectOpenMode || 'group'
+  const created = await chrome.windows.create({})
+  if (typeof created.id !== 'number') throw new Error('新窗口创建失败')
+  const blankTabs = await chrome.tabs.query({ windowId: created.id })
+  const openedTabs = await Promise.all(
+    coll.tabs.map((tab) => createTab(tab.url, { active: false, windowId: created.id }))
+  )
+  await Promise.all(blankTabs.map((tab) => chrome.tabs.remove(tab.id)))
+  if (openMode === 'group' && openedTabs.length > 0) {
+    await createTabGroup(openedTabs.map((tab) => tab.id), coll.name)
+  }
+}
+
+async function openCollectInIncognitoWindow(coll) {
+  if (!coll.tabs.length) {
+    message.info('该收藏集暂无标签页')
+    return
+  }
+  try {
+    const created = await chrome.windows.create({ incognito: true, url: coll.tabs[0].url })
+    await Promise.all(
+      coll.tabs.slice(1).map((tab) => createTab(tab.url, { active: false, windowId: created.id }))
+    )
+  } catch {
+    message.error('无法打开隐私窗口，请在扩展设置中允许无痕模式')
   }
 }
 
@@ -796,6 +1053,7 @@ function closeAiModal() {
 }
 
 async function closeTab(tab) {
+  if (!confirmClose(tab)) return
   await closeTabApi(tab.id)
 }
 
@@ -894,6 +1152,105 @@ function confirmDelete(coll) {
   }
 }
 
+function slugifyFilename(name) {
+  return String(name || 'collect')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '-')
+    .slice(0, 40) || 'collect'
+}
+
+function onExportCollect(coll) {
+  closeMenu()
+  try {
+    const json = exportCollect(coll.id)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    a.href = url
+    a.download = `etab-${slugifyFilename(coll.name)}-${date}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    message.success(`已导出「${coll.name}」（${coll.tabs.length} 个标签）`)
+  } catch (e) {
+    message.error(e.message || '导出失败')
+  }
+}
+
+function onMergeCollect(sourceColl) {
+  closeMenu()
+  const targets = collects.value.filter((c) => !isDefault(c.id) && c.id !== sourceColl.id)
+  if (!targets.length) {
+    message.info('没有可合并的目标收藏集。')
+    return
+  }
+  const options = targets.map((c) => ({ label: c.name, value: c.id }))
+  const selectInst = dialog.create({
+    title: `将「${sourceColl.name}」合并到…`,
+    showIcon: false,
+    content: () => h(NSelect, {
+      value: null,
+      options: options,
+      placeholder: '选择目标收藏集',
+      autofocus: true,
+      'onUpdate:value': async (val) => {
+        if (!val) return
+        selectInst.confirmButtonLoading = true
+        try {
+          const result = await mergeCollect(sourceColl.id, val)
+          const target = collects.value.find((c) => c.id === val)
+          if (result.merged === 0) {
+            message.info(`「${sourceColl.name}」所有标签已在「${target?.name || '目标'}」中。`)
+          } else {
+            message.success(`已合并 ${result.merged} 个新标签到「${target?.name || '目标'}」${result.removed ? `，跳过 ${result.removed} 个重复` : ''}。`)
+          }
+        } catch (e) {
+          message.error(e.message || '合并失败')
+        } finally {
+          selectInst.destroy()
+        }
+      },
+    }),
+    showConfirmButton: false,
+    showCancelButton: true,
+    onCancel: () => selectInst.destroy(),
+  })
+}
+
+async function onDedupCollect(coll) {
+  closeMenu()
+  try {
+    const { removed } = await dedupByUrl(coll.id)
+    if (removed > 0) {
+      message.success(`已从「${coll.name}」移除 ${removed} 个重复标签。`)
+    } else {
+      message.info('「' + coll.name + '」中未发现重复标签。')
+    }
+  } catch (e) {
+    message.error(e.message || '去重失败')
+  }
+}
+
+function triggerImport() {
+  importInputEl.value?.click()
+}
+
+async function onImportFile(event) {
+  const file = event.target.files?.[0]
+  // 重置 input 允许重复选择同一文件
+  event.target.value = ''
+  if (!file) return
+  try {
+    const text = await file.text()
+    const result = await importCollect(text)
+    message.success(`已导入收藏集「${file.name}」（新增 ${result.added}，跳过 ${result.skipped}）`)
+  } catch (e) {
+    message.error(`导入失败：${e.message || '未知错误'}`)
+  }
+}
+
 function selectCollect(collectId) {
   selectedCollectId.value = collectId
   closeMenu()
@@ -940,6 +1297,96 @@ function toggleTabSelection(tab, sourceCollectId) {
 
 function clearTabSelection() {
   selectedTabs.value = new Map()
+}
+
+// ---- 批量操作 ----
+
+const selectedFromDefault = computed(() =>
+  [...selectedTabs.value.values()].filter((tab) => tab.sourceCollectId === DEFAULT_COLLECT_ID)
+)
+const selectedFromCollects = computed(() =>
+  [...selectedTabs.value.values()].filter((tab) => tab.sourceCollectId !== DEFAULT_COLLECT_ID)
+)
+const allPinned = computed(() => {
+  const list = selectedFromDefault.value
+  if (!list.length) return false
+  return list.every((tab) => tab.pinned)
+})
+const allMuted = computed(() => {
+  const list = selectedFromDefault.value
+  if (!list.length) return false
+  return list.every((tab) => tab.muted)
+})
+const collectMoveOptions = computed(() => {
+  const sourceIds = new Set(selectedFromCollects.value.map((tab) => tab.sourceCollectId))
+  return collects.value
+    .filter((collect) => !isDefault(collect.id) && !sourceIds.has(collect.id))
+    .map((collect) => ({ label: collect.name, value: collect.id }))
+})
+
+async function bulkCloseSelected() {
+  const targets = selectedFromDefault.value
+  if (!targets.length) return
+  if (settings.value.confirmBeforeClose) {
+    const preview = targets.slice(0, 3).map((tab) => tab.title || tab.url || `#${tab.id}`).join('、')
+    const more = targets.length > 3 ? ` 等 ${targets.length} 个标签` : ''
+    if (!window.confirm(`确定关闭「${preview}」${more}？`)) return
+  }
+  for (const tab of targets) {
+    try { await closeTabApi(tab.id) } catch { /* 标签可能已关闭 */ }
+  }
+  clearTabSelection()
+}
+
+async function bulkRemoveFromCollect() {
+  const targets = selectedFromCollects.value
+  if (!targets.length) return
+  // 按 sourceCollectId 分组后逐个移除
+  const bySource = new Map()
+  for (const tab of targets) {
+    if (!bySource.has(tab.sourceCollectId)) bySource.set(tab.sourceCollectId, [])
+    bySource.get(tab.sourceCollectId).push(tab)
+  }
+  for (const [collectId, tabs] of bySource) {
+    for (const tab of tabs) {
+      await removeTabFromCollect(collectId, tab.id)
+    }
+  }
+  clearTabSelection()
+}
+
+async function bulkPinSelected(pinned) {
+  for (const tab of selectedFromDefault.value) {
+    await pinTabApi(tab.id, pinned)
+  }
+  clearTabSelection()
+}
+
+async function bulkMuteSelected(muted) {
+  for (const tab of selectedFromDefault.value) {
+    await muteTabApi(tab.id, muted)
+  }
+  clearTabSelection()
+}
+
+async function onBulkMoveSelected(targetCollectId) {
+  if (!targetCollectId) return
+  const targets = selectedFromCollects.value
+  if (!targets.length) return
+  // 按源分组,先加入目标,再从源移除
+  const bySource = new Map()
+  for (const tab of targets) {
+    if (!bySource.has(tab.sourceCollectId)) bySource.set(tab.sourceCollectId, [])
+    bySource.get(tab.sourceCollectId).push(tab)
+  }
+  const snapshots = targets.map(({ id, title, url, favIconUrl }) => ({ id, title, url, favIconUrl }))
+  await addTabsToCollect(targetCollectId, snapshots)
+  for (const [collectId, tabs] of bySource) {
+    for (const tab of tabs) {
+      await removeTabFromCollect(collectId, tab.id)
+    }
+  }
+  clearTabSelection()
 }
 
 // ---- 拖拽 ----
@@ -1195,6 +1642,24 @@ async function onDrop(collectId) {
   height: 22px;
   font-size: 16px;
   line-height: 1;
+}
+
+.sidebar-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .collect-list {
@@ -1591,12 +2056,21 @@ async function onDrop(collectId) {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .saved-tabs-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.saved-tabs-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
 }
 
 .window-group {
@@ -1710,6 +2184,20 @@ async function onDrop(collectId) {
   transition: opacity 0.15s ease;
 }
 
+.tab-favicon-monogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .tab-select-checkbox {
   position: absolute;
   display: inline-flex;
@@ -1786,6 +2274,24 @@ async function onDrop(collectId) {
   stroke-width: 1.9;
 }
 
+.dup-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #fff4d6;
+  color: #b86b00;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.recent-search-select {
+  width: 100%;
+  max-width: 280px;
+  margin-top: 4px;
+}
+
 .tab-card .tab-url {
   font-size: 11px;
   color: var(--text-secondary);
@@ -1835,8 +2341,21 @@ async function onDrop(collectId) {
   font-size: 16px;
 }
 
+.collect-actions .btn-sm svg,
+.tab-actions .btn-sm svg,
+.saved-tabs-actions .btn-sm svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .collect-actions .btn-sm:hover,
-.tab-actions .btn-sm:hover {
+.tab-actions .btn-sm:hover,
+.saved-tabs-actions .btn-sm:hover {
   background: var(--accent-light);
   border-color: transparent;
 }
@@ -1894,5 +2413,83 @@ async function onDrop(collectId) {
   height: 1px;
   margin: 4px 8px;
   background: var(--border);
+}
+
+/* 批量操作栏：fixed 底部居中，z-index 900 < AI 模态的 1000 */
+.bulk-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(22, 35, 54, 0.22);
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+}
+
+.bulk-bar-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.bulk-bar-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+.bulk-bar-btn {
+  width: auto !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.bulk-bar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.bulk-bar-btn.danger {
+  color: var(--danger);
+}
+
+.bulk-bar-btn.danger:hover {
+  background: var(--danger-light);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.bulk-bar-select {
+  min-width: 160px;
+  max-width: 220px;
+}
+
+.bar-slide-enter-active,
+.bar-slide-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.bar-slide-enter-from,
+.bar-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(16px);
 }
 </style>

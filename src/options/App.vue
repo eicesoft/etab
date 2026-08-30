@@ -117,10 +117,15 @@
 
         <NTabPane name="shortcuts" tab="快捷键">
           <section class="option-section">
-            <p class="text-secondary">
-              You can configure keyboard shortcuts in
-              <code>chrome://extensions/shortcuts</code>
-            </p>
+            <div class="option-item form-item">
+              <p class="text-secondary">
+                默认快捷键可在 Chrome 扩展快捷键页面自定义或停用。
+              </p>
+              <ul class="shortcut-list">
+                <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd>（macOS: <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd>）打开 eTab 标签管理器</li>
+              </ul>
+              <button class="btn-primary" type="button" @click="openShortcutsPage">打开 Chrome 快捷键设置</button>
+            </div>
           </section>
         </NTabPane>
 
@@ -131,6 +136,14 @@
             </div>
             <div class="option-item">
               <span>A powerful tab management extension</span>
+            </div>
+            <div class="option-item form-item">
+              <label>存储占用</label>
+              <ul class="storage-usage">
+                <li>收藏集: <strong>{{ storageUsage.collects }}</strong></li>
+                <li>设置: <strong>{{ storageUsage.settings }}</strong></li>
+                <li v-if="storageUsage.recentSearches">最近搜索: <strong>{{ storageUsage.recentSearches }}</strong></li>
+              </ul>
             </div>
           </section>
         </NTabPane>
@@ -148,29 +161,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { NTabs, NTabPane } from 'naive-ui'
-
-const DEFAULT_SETTINGS = {
-  defaultView: 'window',
-  collectOpenMode: 'group',
-  showFavicon: true,
-  confirmBeforeClose: false,
-  ai: {
-    enabled: false,
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    maxTokens: 1024,
-  },
-}
-
-function createDefaultSettings() {
-  return {
-    ...DEFAULT_SETTINGS,
-    ai: { ...DEFAULT_SETTINGS.ai },
-  }
-}
+import { SETTINGS_KEY, createDefaultSettings, mergeSettings } from '../shared/settingsDefaults.js'
 
 const settings = ref(createDefaultSettings())
 const activeTab = ref('general')
@@ -179,20 +172,48 @@ const apiKey = ref('')
 const showApiKey = ref(false)
 const isTesting = ref(false)
 const connectionStatus = ref(null)
+const storageUsage = ref({ collects: '—', settings: '—', recentSearches: '' })
+
+watch(activeTab, (tab) => {
+  if (tab === 'about') refreshStorageUsage()
+})
+
+function formatBytes(n) {
+  if (typeof n !== 'number') return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(2)} MB`
+}
+
+async function refreshStorageUsage() {
+  try {
+    const [localBytes, syncBytes, recentBytes] = await Promise.all([
+      chrome.storage.local.getBytesInUse('etab_collects'),
+      chrome.storage.sync.getBytesInUse(SETTINGS_KEY),
+      chrome.storage.local.getBytesInUse('etab_recent_searches'),
+    ])
+    storageUsage.value = {
+      collects: formatBytes(localBytes),
+      settings: formatBytes(syncBytes),
+      recentSearches: formatBytes(recentBytes),
+    }
+  } catch {
+    // 静默
+  }
+}
+
+function openShortcutsPage() {
+  chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })
+}
 
 onMounted(async () => {
   try {
     const [syncResult, localResult] = await Promise.all([
-      chrome.storage.sync.get('settings'),
+      chrome.storage.sync.get(SETTINGS_KEY),
       chrome.storage.local.get('etab_ai_api_key'),
     ])
-    const storedSettings = syncResult.settings
-    if (storedSettings) {
-      settings.value = {
-        ...createDefaultSettings(),
-        ...storedSettings,
-        ai: { ...DEFAULT_SETTINGS.ai, ...storedSettings.ai },
-      }
+    if (syncResult[SETTINGS_KEY]) {
+      settings.value = mergeSettings(syncResult[SETTINGS_KEY])
     }
     apiKey.value = localResult.etab_ai_api_key || ''
   } catch (e) {
@@ -505,6 +526,30 @@ async function testAiConnection() {
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
+}
+
+.shortcut-list,
+.storage-usage {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.shortcut-list li,
+.storage-usage li {
+  padding: 4px 0;
+}
+
+.shortcut-list kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: 12px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .option-actions {
