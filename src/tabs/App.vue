@@ -412,9 +412,22 @@
               </li>
             </ol>
 
-            <section class="ai-stream-panel" aria-label="AI 返回数据">
-              <div class="ai-stream-title"><span>AI 返回的 JSON 数据</span><span class="ai-stream-dot" aria-hidden="true"></span></div>
-              <pre>{{ aiStreamContent || '等待模型返回 JSON 数据…' }}</pre>
+            <section v-if="aiReasoningContent" class="ai-event-panel ai-reasoning-panel" aria-label="思考过程">
+              <button
+                class="ai-panel-toggle"
+                type="button"
+                :aria-expanded="aiReasoningExpanded"
+                @click="aiReasoningExpanded = !aiReasoningExpanded"
+              >
+                <span>思考过程</span>
+                <span class="ai-panel-toggle-meta">{{ aiReasoningContent.length }} 字符 · {{ aiReasoningExpanded ? '收起' : '展开' }}</span>
+              </button>
+              <pre v-show="aiReasoningExpanded" ref="reasoningPreEl" :class="{ 'ai-typing': isAiReasoningTyping }">{{ aiReasoningTypedText }}</pre>
+            </section>
+
+            <section class="ai-stream-panel" aria-label="实时消息">
+              <div class="ai-stream-title"><span>实时消息</span><span class="ai-stream-dot" aria-hidden="true"></span></div>
+              <pre ref="streamPreEl" :class="{ 'ai-typing': isAiTyping }">{{ aiTypedText || '等待模型输出…' }}</pre>
             </section>
 
             <section class="ai-event-panel" aria-label="处理事件">
@@ -439,7 +452,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { NSelect } from 'naive-ui'
 import { useTabs } from '../shared/useTabs.js'
 import { useCollects } from '../shared/useCollects.js'
@@ -508,7 +521,51 @@ const aiProgressMessage = ref('正在准备需要整理的标签…')
 const aiGroupingSteps = ref([])
 const aiModalOpen = ref(false)
 const aiStreamContent = ref('')
+const aiReasoningContent = ref('')
 const aiEventLog = ref([])
+const aiChunkStats = ref({ chunks: 0, chars: 0 })
+const aiReasoningExpanded = ref(true)
+const streamPreEl = ref(null)
+const reasoningPreEl = ref(null)
+const aiTypedCount = ref(0)
+const aiReasoningTypedCount = ref(0)
+let aiTypeTimer = null
+
+const aiTypedText = computed(() => aiStreamContent.value.slice(0, aiTypedCount.value))
+const isAiTyping = computed(() => aiTypedCount.value < aiStreamContent.value.length)
+const aiReasoningTypedText = computed(() => aiReasoningContent.value.slice(0, aiReasoningTypedCount.value))
+const isAiReasoningTyping = computed(() => aiReasoningTypedCount.value < aiReasoningContent.value.length)
+
+// 打字机效果：按固定节奏把已接收的流内容逐字符显示出来，大段积压时自动加速追平。
+function advanceTypewriter(target, typed) {
+  const total = target.value.length
+  if (typed.value >= total) return false
+  const remaining = total - typed.value
+  typed.value = Math.min(total, typed.value + Math.max(2, Math.ceil(remaining / 80)))
+  return true
+}
+
+function startTypewriter() {
+  if (aiTypeTimer) return
+  aiTypeTimer = setInterval(() => {
+    const hasReasoning = advanceTypewriter(aiReasoningContent, aiReasoningTypedCount)
+    const hasContent = advanceTypewriter(aiStreamContent, aiTypedCount)
+    if (!hasReasoning && !hasContent && !aiGrouping.value) stopTypewriter()
+  }, 16)
+}
+
+function stopTypewriter() {
+  if (!aiTypeTimer) return
+  clearInterval(aiTypeTimer)
+  aiTypeTimer = null
+}
+
+// 流式输出时让内容面板、打字面板与思考面板始终滚动到底部。
+watch([aiStreamContent, aiTypedText, aiReasoningTypedText], async () => {
+  await nextTick()
+  if (streamPreEl.value) streamPreEl.value.scrollTop = streamPreEl.value.scrollHeight
+  if (reasoningPreEl.value) reasoningPreEl.value.scrollTop = reasoningPreEl.value.scrollHeight
+})
 
 onMounted(() => {
   initCollects()
@@ -517,6 +574,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', closeMenu)
+  stopTypewriter()
 })
 
 // ---- 计算属性 ----
@@ -642,7 +700,12 @@ async function groupDefaultTabsWithAi() {
   aiGrouping.value = true
   aiModalOpen.value = true
   aiStreamContent.value = ''
+  aiReasoningContent.value = ''
   aiEventLog.value = []
+  aiChunkStats.value = { chunks: 0, chars: 0 }
+  aiReasoningExpanded.value = true
+  aiTypedCount.value = 0
+  aiReasoningTypedCount.value = 0
   aiProgressMessage.value = '正在准备需要整理的标签…'
   aiGroupingSteps.value = [
     { id: 'preparing', order: 1, label: '准备标签上下文', state: 'active' },
@@ -655,6 +718,7 @@ async function groupDefaultTabsWithAi() {
     const groups = await requestAiTabGroups(aiGroupingCandidates.value, {
       onProgress: updateAiGroupingProgress,
       onResult: handleAiResult,
+      onChunk: handleAiChunk,
     })
     if (!groups.length) {
       aiGroupingStatus.value = { type: 'info', message: 'AI 未建议可创建的分组。' }
@@ -699,9 +763,21 @@ function updateAiGroupingProgress(stage, message) {
   if (!wasActive || message) addAiEvent(aiProgressMessage.value)
 }
 
+function handleAiChunk(chunk) {
+  aiChunkStats.value = { chunks: aiChunkStats.value.chunks + 1, chars: chunk.content.length }
+  if (chunk.reasoning) {
+    aiReasoningContent.value = chunk.reasoning
+    startTypewriter()
+  }
+  if (chunk.content) {
+    aiStreamContent.value = chunk.content
+    startTypewriter()
+  }
+}
+
 function handleAiResult(content) {
   aiStreamContent.value = content
-  addAiEvent('已收到 AI 完整响应，开始解析 JSON。')
+  addAiEvent(`已收到完整响应（${aiChunkStats.value.chunks} 个 chunk，${aiChunkStats.value.chars} 字符），开始解析 JSON。`)
 }
 
 function addAiEvent(message) {
@@ -713,7 +789,10 @@ function addAiEvent(message) {
 }
 
 function closeAiModal() {
-  if (!aiGrouping.value) aiModalOpen.value = false
+  if (!aiGrouping.value) {
+    stopTypewriter()
+    aiModalOpen.value = false
+  }
 }
 
 async function closeTab(tab) {
@@ -1272,6 +1351,8 @@ async function onDrop(collectId) {
 }
 
 .ai-modal {
+  display: flex;
+  flex-direction: column;
   width: min(760px, 100%);
   max-height: min(760px, calc(100vh - 48px));
   overflow: hidden;
@@ -1287,6 +1368,7 @@ async function onDrop(collectId) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
   gap: 16px;
   padding: 18px 22px;
 }
@@ -1322,8 +1404,10 @@ async function onDrop(collectId) {
 
 .ai-modal-body {
   display: grid;
+  flex: 1;
+  align-content: start;
   gap: 16px;
-  max-height: calc(min(760px, 100vh - 48px) - 145px);
+  min-height: 0;
   padding: 20px 22px;
   overflow-y: auto;
 }
@@ -1393,6 +1477,37 @@ async function onDrop(collectId) {
   font-weight: 600;
 }
 
+.ai-panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-panel-toggle:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.ai-panel-toggle-meta {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-panel-toggle[aria-expanded='false'] {
+  border-bottom: 0;
+}
+
 .ai-stream-dot {
   width: 7px;
   height: 7px;
@@ -1401,7 +1516,8 @@ async function onDrop(collectId) {
   animation: ai-step-pulse 1.15s ease-in-out infinite;
 }
 
-.ai-stream-panel pre {
+.ai-stream-panel pre,
+.ai-event-panel pre {
   min-height: 96px;
   max-height: 190px;
   margin: 0;
@@ -1411,6 +1527,17 @@ async function onDrop(collectId) {
   font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.ai-typing::after {
+  content: '▍';
+  margin-left: 1px;
+  color: var(--accent);
+  animation: ai-caret-blink 0.9s steps(1) infinite;
+}
+
+@keyframes ai-caret-blink {
+  50% { opacity: 0; }
 }
 
 .ai-event-panel ul {

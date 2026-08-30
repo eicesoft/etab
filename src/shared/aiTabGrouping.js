@@ -19,8 +19,77 @@ function parseJson(content) {
   try {
     return JSON.parse(cleaned)
   } catch {
-    throw new Error('模型没有返回可解析的 JSON 数据。')
+    throw new Error(`模型没有返回可解析的 JSON 数据：${cleaned.slice(0, 160) || '（空响应）'}`)
   }
+}
+
+/**
+ * 提取一条 SSE 事件中所有 data: 行的内容（按规范用换行拼接）。
+ */
+function sseEventData(rawEvent) {
+  return rawEvent
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).replace(/^ /, ''))
+    .join('\n')
+}
+
+/**
+ * 读取 text/event-stream 流式响应，逐段回调 onChunk 并累积 delta.content
+ * 与 delta.reasoning_content（思考模型输出）。
+ */
+async function readSseStream(response, onChunk) {
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  let reasoning = ''
+  let finishReason = null
+  let index = 0
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+
+      let boundary
+      while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+        const rawEvent = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+
+        const data = sseEventData(rawEvent)
+        if (!data) continue
+        if (data === '[DONE]') {
+          return { content, reasoning, finishReason }
+        }
+
+        let chunk
+        try {
+          chunk = JSON.parse(data)
+        } catch {
+          chunk = null
+        }
+        if (!chunk) continue
+
+        const choice = chunk.choices?.[0]
+        const delta = choice?.delta?.content
+        if (typeof delta === 'string' && delta) content += delta
+        const reasoningDelta = choice?.delta?.reasoning_content
+        if (typeof reasoningDelta === 'string' && reasoningDelta) reasoning += reasoningDelta
+        if (choice?.finish_reason) finishReason = choice.finish_reason
+        if (delta || reasoningDelta) {
+          onChunk({ index: index++, delta: delta || '', content, reasoning })
+        }
+      }
+    }
+  } catch (error) {
+    throw new Error(`读取 AI 流式响应失败：${error.message || error}`)
+  } finally {
+    reader.cancel().catch(() => {})
+  }
+
+  return { content, reasoning, finishReason }
 }
 
 /**
@@ -68,9 +137,13 @@ ${JSON.stringify(tabs.map(({ id, windowId, title, url }) => ({ id, windowId, tit
 
 /**
  * 通过标准异步 Chat Completions 请求模型输出并验证分组。
+ * 服务端返回流式（text/event-stream）时逐 chunk 解析并经 onChunk 上报，否则按普通 JSON 处理。
  * 调用前须已通过“测试 API 连接”授予自定义域名访问权限。
  */
-export async function requestAiTabGroups(candidateTabs, { onProgress = () => {}, onResult = () => {} } = {}) {
+export async function requestAiTabGroups(
+  candidateTabs,
+  { onProgress = () => {}, onResult = () => {}, onChunk = () => {} } = {}
+) {
   onProgress('preparing')
   const [syncResult, localResult] = await Promise.all([
     chrome.storage.sync.get('settings'),
@@ -100,6 +173,7 @@ export async function requestAiTabGroups(candidateTabs, { onProgress = () => {},
       temperature: ai.temperature,
       max_tokens: ai.maxTokens,
       response_format: { type: 'json_object' },
+      stream: true,
       messages: [
         { role: 'system', content: '严格遵循用户指定的 JSON 格式返回结果。' },
         { role: 'user', content: buildPrompt(candidateTabs) },
@@ -111,8 +185,15 @@ export async function requestAiTabGroups(candidateTabs, { onProgress = () => {},
     throw new Error(body?.error?.message || body?.message || `AI 请求失败（HTTP ${response.status}）。`)
   }
 
-  const body = await response.json().catch(() => null)
-  const content = body?.choices?.[0]?.message?.content
+  const contentType = response.headers.get('content-type') || ''
+  let content = ''
+  if (contentType.includes('text/event-stream')) {
+    onProgress('requesting', '已建立流式连接，等待模型输出…')
+    content = (await readSseStream(response, onChunk)).content
+  } else {
+    const body = await response.json().catch(() => null)
+    content = body?.choices?.[0]?.message?.content || ''
+  }
   if (typeof content !== 'string' || !content.trim()) {
     throw new Error('AI 服务未返回有效的模型内容。')
   }
