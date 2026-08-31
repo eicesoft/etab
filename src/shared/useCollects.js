@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 
 /**
  * 收藏集管理 composable
@@ -99,6 +99,17 @@ export function useCollects() {
   const selectedCollect = computed(() => {
     return collects.value.find((c) => c.id === selectedCollectId.value) || collects.value[0] || null
   })
+
+  // 后台服务同步已关联标签时，立即将存储变化反映到当前页面。
+  function handleStorageChange(changes, areaName) {
+    if (areaName !== 'local' || !changes[STORAGE_KEY]) return
+    const next = ensureDefault(migrateCollects(changes[STORAGE_KEY].newValue || []))
+    cachedCollects = next
+    collects.value = next
+  }
+
+  chrome.storage.onChanged.addListener(handleStorageChange)
+  onUnmounted(() => chrome.storage.onChanged.removeListener(handleStorageChange))
 
   /**
    * 初始化：加载收藏集

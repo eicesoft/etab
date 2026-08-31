@@ -104,6 +104,9 @@
                   @click="toggleCollectMenu(coll.id)"
                 >⋮</button>
                 <div class="dropdown-menu" :class="{ 'is-open': openMenuId === `collect-${coll.id}` }" @click.stop="closeMenu">
+                  <button @click="openCollectInNewWindow(coll)">在新窗口打开</button>
+                  <button @click="openCollectInIncognitoWindow(coll)">在隐私窗口打开</button>
+                  <div class="dropdown-divider"></div>
                   <button @click="startRename(coll)">重命名</button>
                   <button @click="onExportCollect(coll)">导出 JSON</button>
                   <button @click="onMergeCollect(coll)">合并到…</button>
@@ -259,10 +262,18 @@
                     <span class="tab-select-checkbox" aria-hidden="true">✓</span>
                   </button>
                   <div class="tab-body">
-                    <div class="tab-title" :title="tab.title + '\n' + tab.url">
-                      <span class="tab-title-text">{{ tab.title }}</span>
-                      <span v-if="displayDomain(tab.url)" class="tab-domain">({{ displayDomain(tab.url) }})</span>
-                    </div>
+                    <NTooltip placement="top-start" :delay="250" :show-arrow="false" class="tab-info-tooltip">
+                      <template #trigger>
+                        <div class="tab-title">
+                          <span class="tab-title-text">{{ tab.title }}</span>
+                          <span v-if="displayDomain(tab.url)" class="tab-domain">({{ displayDomain(tab.url) }})</span>
+                        </div>
+                      </template>
+                      <div class="tab-tooltip-content">
+                        <strong>{{ tab.title }}</strong>
+                        <span>{{ tab.url }}</span>
+                      </div>
+                    </NTooltip>
                   </div>
                   <div class="tab-meta">
                     <span v-if="tabGroupInfo(tab)" class="tab-group-chip" :title="`标签组：${tabGroupInfo(tab).title}`">
@@ -339,11 +350,19 @@
                   <span class="tab-select-checkbox" aria-hidden="true">✓</span>
                 </button>
                 <div class="tab-body">
-                  <div class="tab-title" :title="tab.title + '\n' + tab.url">
-                    <span class="tab-title-text">{{ tab.title }}</span>
-                    <span v-if="displayDomain(tab.url)" class="tab-domain">({{ displayDomain(tab.url) }})</span>
-                  </div>
-                  </div>
+                  <NTooltip placement="top-start" :delay="250" :show-arrow="false" class="tab-info-tooltip">
+                    <template #trigger>
+                      <div class="tab-title">
+                        <span class="tab-title-text">{{ tab.title }}</span>
+                        <span v-if="displayDomain(tab.url)" class="tab-domain">({{ displayDomain(tab.url) }})</span>
+                      </div>
+                    </template>
+                    <div class="tab-tooltip-content">
+                      <strong>{{ tab.title }}</strong>
+                      <span>{{ tab.url }}</span>
+                    </div>
+                  </NTooltip>
+                </div>
                 <div class="tab-meta">
                     <span v-if="tabGroupInfo(tab)" class="tab-group-chip" :title="`标签组：${tabGroupInfo(tab).title}`">
                       <span class="tab-group-dot" aria-hidden="true"></span>
@@ -448,10 +467,18 @@
                 <span class="tab-select-checkbox" aria-hidden="true">✓</span>
               </button>
               <div class="tab-body">
-                <div class="tab-title" :title="stored.title + '\n' + stored.url">
-                  <span class="tab-title-text">{{ stored.title }}</span>
-                  <span v-if="displayDomain(stored.url)" class="tab-domain">({{ displayDomain(stored.url) }})</span>
-                </div>
+                <NTooltip placement="top-start" :delay="250" :show-arrow="false" class="tab-info-tooltip">
+                  <template #trigger>
+                    <div class="tab-title">
+                      <span class="tab-title-text">{{ stored.title }}</span>
+                      <span v-if="displayDomain(stored.url)" class="tab-domain">({{ displayDomain(stored.url) }})</span>
+                    </div>
+                  </template>
+                  <div class="tab-tooltip-content">
+                    <strong>{{ stored.title }}</strong>
+                    <span>{{ stored.url }}</span>
+                  </div>
+                </NTooltip>
               </div>
               <div class="tab-actions">
                 <button class="btn-sm" title="打开标签页" @click.stop="openSavedTab(stored)">↗</button>
@@ -586,7 +613,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, h } from 'vue'
-import { NSelect, useDialog, useMessage } from 'naive-ui'
+import { NSelect, NTooltip, useDialog, useMessage } from 'naive-ui'
 import { useTabs } from '../shared/useTabs.js'
 import { useCollects } from '../shared/useCollects.js'
 import { useSettings } from '../shared/useSettings.js'
@@ -937,6 +964,7 @@ async function openCollectInCurrentWindow(coll) {
   const openedTabs = await Promise.all(
     coll.tabs.map((tab) => createTab(tab.url, { active: false, windowId: currentWindow.id }))
   )
+  await linkOpenedCollectTabs(coll, openedTabs)
 
   if (openMode === 'group' && openedTabs.length > 0) {
     await createTabGroup(openedTabs.map((tab) => tab.id), coll.name)
@@ -948,18 +976,23 @@ async function openCollectInNewWindow(coll) {
     message.info('该收藏集暂无标签页')
     return
   }
-  const result = await chrome.storage.sync.get('settings')
-  const openMode = result.settings?.collectOpenMode || 'group'
   const created = await chrome.windows.create({})
   if (typeof created.id !== 'number') throw new Error('新窗口创建失败')
   const blankTabs = await chrome.tabs.query({ windowId: created.id })
   const openedTabs = await Promise.all(
     coll.tabs.map((tab) => createTab(tab.url, { active: false, windowId: created.id }))
   )
+  await linkOpenedCollectTabs(coll, openedTabs)
   await Promise.all(blankTabs.map((tab) => chrome.tabs.remove(tab.id)))
-  if (openMode === 'group' && openedTabs.length > 0) {
-    await createTabGroup(openedTabs.map((tab) => tab.id), coll.name)
-  }
+}
+
+/** 将本次打开的实际 Chrome 标签与对应收藏条目绑定，由后台持续回写内容。 */
+async function linkOpenedCollectTabs(coll, openedTabs) {
+  const tabs = coll.tabs
+    .map((storedTab, index) => ({ storedTabId: storedTab.id, tabId: openedTabs[index]?.id }))
+    .filter((tab) => typeof tab.tabId === 'number')
+  if (!tabs.length) return
+  await chrome.runtime.sendMessage({ type: 'LINK_COLLECT_TABS', collectId: coll.id, tabs })
 }
 
 async function openCollectInIncognitoWindow(coll) {
@@ -1509,11 +1542,14 @@ function onDragStart(e, tab, sourceCollectId) {
     sourceCollectId,
   }
   const selectedFromSource = [...selectedTabs.value.values()].filter(
-    (selected) => selected.sourceCollectId === sourceCollectId
+    (selected) => selected.sourceCollectId === sourceCollectId && (
+      sourceCollectId !== DEFAULT_COLLECT_ID || selected.windowId === tab.windowId
+    )
   )
   dragTabData.value = {
     sourceCollectId,
-    tabs: isTabSelected(tab, sourceCollectId) ? selectedFromSource : [currentTab],
+    tabs: (isTabSelected(tab, sourceCollectId) ? selectedFromSource : [currentTab])
+      .sort((a, b) => a.index - b.index),
   }
   draggingTabId.value = tab.id
   e.dataTransfer.effectAllowed = 'move'
@@ -1529,11 +1565,11 @@ function onDragEnd() {
 }
 
 function canDropOnCard(targetTab) {
-  const sourceTab = dragTabData.value?.tabs?.[0]
-  if (!sourceTab || dragTabData.value.tabs.length !== 1 || sourceTab.id === targetTab.id) return false
+  const sourceTabs = dragTabData.value?.tabs || []
+  if (!sourceTabs.length || sourceTabs.some((sourceTab) => sourceTab.id === targetTab.id)) return false
   return (
-    (sourceTab.sourceCollectId === DEFAULT_COLLECT_ID && isDefault(selectedCollectId.value)) ||
-    (sourceTab.sourceCollectId === selectedCollectId.value && !isDefault(selectedCollectId.value))
+    (dragTabData.value.sourceCollectId === DEFAULT_COLLECT_ID && isDefault(selectedCollectId.value)) ||
+    (dragTabData.value.sourceCollectId === selectedCollectId.value && !isDefault(selectedCollectId.value))
   )
 }
 
@@ -1566,21 +1602,25 @@ function tabDragClasses(tab) {
 }
 
 async function onCardDrop(e, targetTab) {
-  const sourceTab = dragTabData.value?.tabs?.[0]
+  const sourceTabs = dragTabData.value?.tabs || []
   onDragEnd()
 
-  if (!sourceTab || sourceTab.id === targetTab.id) return
+  if (!sourceTabs.length || sourceTabs.some((sourceTab) => sourceTab.id === targetTab.id)) return
   const bounds = e.currentTarget.getBoundingClientRect()
   const placeAfter = e.clientY > bounds.top + bounds.height / 2
 
   // 实时标签页可在窗口内或窗口间重排；收藏集只允许在同一收藏集内排序。
-  if (sourceTab.sourceCollectId === DEFAULT_COLLECT_ID && isDefault(selectedCollectId.value)) {
+  if (sourceTabs[0].sourceCollectId === DEFAULT_COLLECT_ID && isDefault(selectedCollectId.value)) {
     let targetIndex = targetTab.index + (placeAfter ? 1 : 0)
-    if (sourceTab.windowId === targetTab.windowId && sourceTab.index < targetIndex) targetIndex -= 1
-    await moveTabApi(sourceTab.id, targetTab.windowId, targetIndex)
+    // 同窗口移动时，先被移走的标签会使目标插入位置左移。
+    targetIndex -= sourceTabs.filter(
+      (sourceTab) => sourceTab.windowId === targetTab.windowId && sourceTab.index < targetIndex
+    ).length
+    await moveTabApi(sourceTabs.map((sourceTab) => sourceTab.id), targetTab.windowId, Math.max(0, targetIndex))
     await refresh()
-  } else if (sourceTab.sourceCollectId === selectedCollectId.value && !isDefault(selectedCollectId.value)) {
-    await moveTabInCollect(selectedCollectId.value, sourceTab.id, targetTab.id, placeAfter)
+    clearTabSelection()
+  } else if (sourceTabs.length === 1 && sourceTabs[0].sourceCollectId === selectedCollectId.value && !isDefault(selectedCollectId.value)) {
+    await moveTabInCollect(selectedCollectId.value, sourceTabs[0].id, targetTab.id, placeAfter)
   }
 }
 
@@ -1779,9 +1819,9 @@ async function onDrop(collectId) {
 .collect-item {
   display: flex;
   align-items: center;
-  height: 45px;
+  height: 48px;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 0 14px;
   cursor: pointer;
   transition: background 0.15s;
   border-bottom: 1px solid var(--border);
@@ -1808,6 +1848,7 @@ async function onDrop(collectId) {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  line-height: 20px;
 }
 
 .collect-icon {
@@ -1822,6 +1863,9 @@ async function onDrop(collectId) {
 }
 
 .collect-name {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
   font-size: 13px;
   font-weight: 500;
   overflow: hidden;
@@ -1844,7 +1888,12 @@ async function onDrop(collectId) {
 }
 
 .collect-count {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  height: 20px;
   font-size: 11px;
+  line-height: 1;
   color: var(--text-secondary);
   background: var(--bg-secondary);
   padding: 0 6px;
@@ -1854,7 +1903,15 @@ async function onDrop(collectId) {
 
 .collect-actions {
   display: flex;
+  align-items: center;
+  align-self: center;
   gap: 4px;
+  line-height: 1;
+}
+
+.collect-actions .dropdown {
+  display: flex;
+  align-items: center;
 }
 
 /* 右侧主区域 */
@@ -2315,6 +2372,29 @@ async function onDrop(collectId) {
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tab-tooltip-content {
+  display: grid;
+  gap: 4px;
+  max-width: min(520px, 65vw);
+}
+
+.tab-tooltip-content strong,
+.tab-tooltip-content span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-tooltip-content strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tab-tooltip-content span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
 }
 
 .tab-select-control {

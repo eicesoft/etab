@@ -230,8 +230,8 @@ async function openInNewWindow(panel) {
   const openedTabs = await Promise.all(
     panel.allTabs.map((tab) => createTab(tab.url, { active: false, windowId: created.id }))
   )
+  await linkOpenedCollectTabs(panel, openedTabs)
   await Promise.all(blankTabs.map((tab) => chrome.tabs.remove(tab.id)))
-  await groupTabsIfConfigured(panel, openedTabs)
 }
 
 async function openInIncognitoWindow(panel) {
@@ -247,7 +247,17 @@ async function openInIncognitoWindow(panel) {
 async function openCollectionInWindow(panel, windowId) {
   if (!panel.allTabs.length) return message.info('该收藏集暂无标签页')
   const createdTabs = await Promise.all(panel.allTabs.map((tab) => createTab(tab.url, { active: false, windowId })))
+  await linkOpenedCollectTabs(panel, createdTabs)
   await groupTabsIfConfigured(panel, createdTabs)
+}
+
+/** 将本次打开的实际 Chrome 标签与对应收藏条目绑定，由后台持续回写内容。 */
+async function linkOpenedCollectTabs(panel, openedTabs) {
+  const tabs = panel.allTabs
+    .map((storedTab, index) => ({ storedTabId: storedTab.id, tabId: openedTabs[index]?.id }))
+    .filter((tab) => typeof tab.tabId === 'number')
+  if (!tabs.length) return
+  await chrome.runtime.sendMessage({ type: 'LINK_COLLECT_TABS', collectId: panel.id, tabs })
 }
 
 async function groupTabsIfConfigured(panel, tabsToGroup) {
@@ -265,8 +275,8 @@ function openOptions() { chrome.runtime.openOptionsPage(); window.close() }
 .popup-header, .header-actions, .collect-header { display: flex; align-items: center; gap: 8px; }
 .logo { color: var(--accent); font-size: 16px; }.header-actions { margin-left: auto; gap: 2px; }
 .btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); }.btn-icon:hover { background: var(--bg-hover); color: var(--accent); }.btn-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-.collect-collapse :deep(.n-collapse-item__header) { min-height: 42px; padding: 0 4px; }.collect-collapse :deep(.n-collapse-item__header-main) { display: flex; align-items: center; min-width: 0; }.collect-collapse :deep(.n-collapse-item__content-inner) { padding: 8px 10px 10px; background: var(--bg-card); }
-.collect-header { width: 100%; min-height: 42px; }.collect-icon { width: 17px; height: 17px; flex-shrink: 0; fill: none; stroke: var(--text-secondary); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }.collect-name { min-width: 0; max-width: 155px; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.collect-default-name { color: #6b7280; }.collect-count { flex-shrink: 0; padding: 1px 6px; border-radius: 9px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; }.collect-actions { display: inline-flex; margin-left: auto; gap: 2px; }.collect-actions button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-secondary); }.collect-actions button:hover { background: var(--accent-light); color: var(--accent); }.collect-actions svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.collect-collapse :deep(.n-collapse-item__header) { height: 40px; min-height: 0; padding: 0 4px; }.collect-collapse :deep(.n-collapse-item__header-main) { display: flex; align-items: center; height: 100%; min-width: 0; transform: translateY(2px); }.collect-collapse :deep(.n-collapse-item__content-inner) { padding: 8px 10px 10px; background: var(--bg-card); }
+.collect-header { display: flex; align-items: center; width: 100%; height: 100%; min-height: 0; }.collect-icon { width: 17px; height: 17px; flex-shrink: 0; fill: none; stroke: var(--text-secondary); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }.collect-name { display: inline-flex; align-items: center; min-width: 0; max-width: 155px; height: 20px; overflow: hidden; font-size: 13px; font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }.collect-default-name { color: #6b7280; }.collect-count { display: inline-flex; align-items: center; flex-shrink: 0; height: 20px; padding: 0 6px; border-radius: 9px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; line-height: 1; }.collect-actions { display: inline-flex; align-items: center; align-self: center; margin-left: auto; gap: 2px; line-height: 1; }.collect-actions button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-secondary); }.collect-actions button:hover { background: var(--accent-light); color: var(--accent); }.collect-actions svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .tab-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 6px; }.tab-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 2px; background: var(--bg-secondary); }.tab-icon-button.is-pinned { border-color: #86bcf7; background: #cfe5ff; box-shadow: inset 2px 0 0 var(--accent); }.tab-icon-button:hover { border-color: var(--accent); background: var(--accent-light); transform: translateY(-1px); }.tab-icon-button img { width: 18px; height: 18px; }
 .recent-search-select { width: 100%; }
 .tab-icon-monogram {

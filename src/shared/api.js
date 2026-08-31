@@ -41,7 +41,7 @@ export async function getCurrentWindowTabs() {
 
 /**
  * 激活并切换到指定标签页
- * @param {number} tabId
+ * @param {number|number[]} tabId
  * @param {number} [windowId]
  */
 export async function activateTab(tabId, windowId) {
@@ -205,7 +205,7 @@ export async function duplicateTab(tabId) {
 
 /**
  * 将标签页移动到指定窗口中的位置
- * @param {number} tabId
+ * @param {number|number[]} tabId
  * @param {number} windowId
  * @param {number} index
  */

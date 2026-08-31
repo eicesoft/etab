@@ -17,6 +17,90 @@ chrome.runtime.onStartup.addListener(() => {
   scheduleBadgeUpdate()
 })
 
+const COLLECTS_STORAGE_KEY = 'etab_collects'
+
+async function updateCollects(mutator) {
+  const commit = async () => {
+    const result = await chrome.storage.local.get(COLLECTS_STORAGE_KEY)
+    const current = Array.isArray(result[COLLECTS_STORAGE_KEY]) ? result[COLLECTS_STORAGE_KEY] : []
+    const next = mutator(current)
+    if (next === current) return current
+    await chrome.storage.local.set({ [COLLECTS_STORAGE_KEY]: next })
+    return next
+  }
+  if (globalThis.navigator?.locks?.request) {
+    return globalThis.navigator.locks.request(COLLECTS_STORAGE_KEY, { mode: 'exclusive' }, commit)
+  }
+  return commit()
+}
+
+function syncedTabInfo(savedTab, liveTab) {
+  return {
+    ...savedTab,
+    linkedTabId: liveTab.id,
+    linkedWindowId: liveTab.windowId,
+    title: liveTab.title || savedTab.title,
+    url: liveTab.url || savedTab.url,
+    favIconUrl: liveTab.favIconUrl || savedTab.favIconUrl || '',
+  }
+}
+
+async function syncLinkedTab(tab) {
+  if (typeof tab?.id !== 'number') return
+  await updateCollects((collects) => {
+    let changed = false
+    const next = collects.map((collect) => {
+      if (!Array.isArray(collect.tabs) || !collect.tabs.some((savedTab) => savedTab.linkedTabId === tab.id)) return collect
+      changed = true
+      return {
+        ...collect,
+        tabs: collect.tabs.map((savedTab) => savedTab.linkedTabId === tab.id ? syncedTabInfo(savedTab, tab) : savedTab),
+      }
+    })
+    return changed ? next : collects
+  })
+}
+
+async function unlinkClosedTab(tabId) {
+  await updateCollects((collects) => {
+    let changed = false
+    const next = collects.map((collect) => {
+      if (!Array.isArray(collect.tabs) || !collect.tabs.some((savedTab) => savedTab.linkedTabId === tabId)) return collect
+      changed = true
+      return {
+        ...collect,
+        tabs: collect.tabs.map((savedTab) => savedTab.linkedTabId === tabId
+          ? { ...savedTab, linkedTabId: undefined, linkedWindowId: undefined }
+          : savedTab),
+      }
+    })
+    return changed ? next : collects
+  })
+}
+
+async function linkCollectTabs(collectId, links) {
+  const liveTabs = await Promise.all(links.map(async ({ storedTabId, tabId }) => {
+    try {
+      return { storedTabId, tab: await chrome.tabs.get(tabId) }
+    } catch {
+      return null
+    }
+  }))
+  const linked = liveTabs.filter(Boolean)
+  if (!linked.length) return
+  await updateCollects((collects) => collects.map((collect) => {
+    if (collect.id !== collectId || !Array.isArray(collect.tabs)) return collect
+    const byStoredId = new Map(linked.map(({ storedTabId, tab }) => [storedTabId, tab]))
+    return {
+      ...collect,
+      tabs: collect.tabs.map((savedTab) => {
+        const liveTab = byStoredId.get(savedTab.id)
+        return liveTab ? syncedTabInfo(savedTab, liveTab) : savedTab
+      }),
+    }
+  }))
+}
+
 // 监听标签页变化，广播给所有页面
 function notifyTabChange(action, tabInfo) {
   chrome.runtime.sendMessage({
@@ -36,12 +120,14 @@ chrome.tabs.onCreated.addListener((tab) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url || changeInfo.groupId !== undefined) {
+    syncLinkedTab(tab).catch(() => {})
     notifyTabChange('updated', tab)
     scheduleBadgeUpdate()
   }
 })
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+  unlinkClosedTab(tabId).catch(() => {})
   notifyTabChange('removed', { id: tabId, windowId: removeInfo.windowId })
   scheduleBadgeUpdate()
 })
@@ -131,6 +217,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ error: e.message })
         }
       })()
+      return true
+
+    case 'LINK_COLLECT_TABS':
+      linkCollectTabs(message.collectId, Array.isArray(message.tabs) ? message.tabs : [])
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ error: error.message }))
       return true
 
     default:
