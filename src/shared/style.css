@@ -120,8 +120,8 @@ input[type='search']:focus {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 6px 10px;
   background: var(--bg-card);
   border-radius: var(--radius);
   border: 1px solid var(--border);

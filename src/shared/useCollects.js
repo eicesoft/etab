@@ -89,6 +89,7 @@ function normalizeUrl(raw) {
 
 /** 用于导出导入的 schema 版本。 */
 const EXPORT_SCHEMA = 'etab.collect/v1'
+const EXPORT_ALL_SCHEMA = 'etab.collects/v1'
 
 export function useCollects() {
   const collects = ref([])
@@ -288,6 +289,26 @@ export function useCollects() {
     return JSON.stringify(payload, null, 2)
   }
 
+  /** 导出全部非 Default 收藏集为一个 JSON 备份。 */
+  function exportCollects() {
+    const payload = {
+      schema: EXPORT_ALL_SCHEMA,
+      exportedAt: new Date().toISOString(),
+      collects: collects.value
+        .filter((collect) => collect.id !== DEFAULT_COLLECT_ID)
+        .map((collect) => ({
+          name: collect.name,
+          tabs: collect.tabs.map((tab) => ({
+            title: tab.title,
+            url: tab.url,
+            favIconUrl: tab.favIconUrl || '',
+            savedAt: tab.savedAt || Date.now(),
+          })),
+        })),
+    }
+    return JSON.stringify(payload, null, 2)
+  }
+
   /**
    * 导入 JSON 字符串为新收藏集。
    * @returns {Promise<{collectId: string, added: number, skipped: number, errors: string[]}>}
@@ -347,6 +368,37 @@ export function useCollects() {
       skipped: payload.tabs.length - cleaned.length,
       errors,
     }
+  }
+
+  /** 导入由 exportCollects 生成的收藏集备份，始终追加，不影响现有收藏集。 */
+  async function importCollects(jsonText) {
+    let payload
+    try {
+      payload = JSON.parse(jsonText)
+    } catch (e) {
+      throw new Error(`JSON 无效：${e.message}`)
+    }
+    if (payload?.schema !== EXPORT_ALL_SCHEMA || !Array.isArray(payload.collects)) {
+      throw new Error('不是 eTab 收藏集备份文件。')
+    }
+    if (payload.collects.length > 100) throw new Error('收藏集数量超过 100 上限。')
+
+    let imported = 0
+    let added = 0
+    let skipped = 0
+    const errors = []
+    for (const [index, collect] of payload.collects.entries()) {
+      try {
+        const result = await importCollect(JSON.stringify(collect))
+        imported += 1
+        added += result.added
+        skipped += result.skipped
+      } catch (error) {
+        errors.push(`第 ${index + 1} 个收藏集：${error.message || '导入失败'}`)
+      }
+    }
+    if (!imported) throw new Error(errors.join('；') || '备份中没有可导入的收藏集。')
+    return { imported, added, skipped, errors }
   }
 
   /**
@@ -428,7 +480,9 @@ export function useCollects() {
     moveTabInCollect,
     dedupByUrl,
     exportCollect,
+    exportCollects,
     importCollect,
+    importCollects,
     mergeCollect,
     isDefault,
     getCollectsForTab,

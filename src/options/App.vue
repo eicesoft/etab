@@ -152,8 +152,17 @@
       <!-- 操作按钮 -->
       <div class="option-actions">
         <button class="btn-primary" @click="saveSettings">Save Settings</button>
+        <button class="btn-ghost" type="button" @click="exportSettings">导出设置</button>
+        <button class="btn-ghost" type="button" @click="triggerSettingsImport">导入设置</button>
         <button class="btn-ghost" @click="resetSettings">Reset to Default</button>
       </div>
+      <input
+        ref="settingsImportInputEl"
+        type="file"
+        accept="application/json,.json"
+        class="visually-hidden"
+        @change="onSettingsImportFile"
+      />
 
       <div v-if="saved" class="toast">Settings saved!</div>
     </div>
@@ -173,6 +182,7 @@ const showApiKey = ref(false)
 const isTesting = ref(false)
 const connectionStatus = ref(null)
 const storageUsage = ref({ collects: '—', settings: '—', recentSearches: '' })
+const settingsImportInputEl = ref(null)
 
 watch(activeTab, (tab) => {
   if (tab === 'about') refreshStorageUsage()
@@ -242,6 +252,48 @@ async function resetSettings() {
   settings.value = createDefaultSettings()
   apiKey.value = ''
   await saveSettings()
+}
+
+function downloadJson(json, filename) {
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function exportSettings() {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  downloadJson(JSON.stringify({
+    schema: 'etab.settings/v1',
+    exportedAt: new Date().toISOString(),
+    settings: settings.value,
+  }, null, 2), `etab-settings-${date}.json`)
+}
+
+function triggerSettingsImport() {
+  settingsImportInputEl.value?.click()
+}
+
+async function onSettingsImportFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  try {
+    const payload = JSON.parse(await file.text())
+    if (payload?.schema !== 'etab.settings/v1' || !payload.settings || typeof payload.settings !== 'object') {
+      throw new Error('不是 eTab 设置备份文件。')
+    }
+    settings.value = mergeSettings(payload.settings)
+    await saveSettings()
+  } catch (error) {
+    console.error('Failed to import settings:', error)
+    connectionStatus.value = { type: 'error', message: `导入设置失败：${error.message || '未知错误'}` }
+  }
 }
 
 function formatApiError(status, payload) {

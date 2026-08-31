@@ -31,10 +31,11 @@
           <div class="sidebar-header-actions">
             <button
               class="btn-sm"
-              title="导入收藏集 (JSON)"
+              title="导入收藏集备份 (JSON)"
               aria-label="导入收藏集"
               @click="triggerImport"
             >↥</button>
+            <button class="btn-sm" title="导出全部收藏集 (JSON)" aria-label="导出全部收藏集" @click="onExportCollects">↧</button>
             <button class="btn-sm" title="新建收藏集" @click="startCreateCollect">+</button>
           </div>
           <input
@@ -159,20 +160,14 @@
             >
               {{ ungrouping ? '正在去除分组…' : '🧹 一键去除分组' }}
             </button>
-            <button
-              class="btn-ghost"
-              :class="{ active: viewMode === 'window' }"
-              @click="viewMode = 'window'"
-            >
-              📂 按窗口分组
-            </button>
-            <button
-              class="btn-ghost"
-              :class="{ active: viewMode === 'flat' }"
-              @click="viewMode = 'flat'"
-            >
-              📋 平铺列表
-            </button>
+            <div v-if="isDefault(selectedCollectId)" class="toolbar-view-actions">
+              <button class="btn-ghost header-icon-button toolbar-view-button" :class="{ active: viewMode === 'window' }" title="按窗口分组" aria-label="按窗口分组" @click="viewMode = 'window'">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M3.5 9h17M7 6.75h.01M10 6.75h.01" /></svg>
+              </button>
+              <button class="btn-ghost header-icon-button toolbar-view-button" :class="{ active: viewMode === 'flat' }" title="平铺列表" aria-label="平铺列表" @click="viewMode = 'flat'">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12" /><circle cx="4.5" cy="6" r=".8" fill="currentColor" stroke="none" /><circle cx="4.5" cy="12" r=".8" fill="currentColor" stroke="none" /><circle cx="4.5" cy="18" r=".8" fill="currentColor" stroke="none" /></svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -199,7 +194,7 @@
           <!-- 按窗口分组视图 -->
           <template v-if="viewMode === 'window'">
             <div v-for="win in windows" :key="win.windowId" class="window-group">
-              <div class="window-header">
+              <div class="window-header" :class="{ 'is-incognito-window': win.incognito }">
                 <h2>{{ win.windowName }}</h2>
                 <span class="badge badge-primary">{{ win.tabs.length }} 个标签页</span>
                 <form
@@ -264,7 +259,10 @@
                     <span class="tab-select-checkbox" aria-hidden="true">✓</span>
                   </button>
                   <div class="tab-body">
-                    <div class="tab-title" :title="tab.title + '\n' + tab.url">{{ tab.title }}</div>
+                    <div class="tab-title" :title="tab.title + '\n' + tab.url">
+                      <span class="tab-title-text">{{ tab.title }}</span>
+                      <span v-if="displayDomain(tab.url)" class="tab-domain">({{ displayDomain(tab.url) }})</span>
+                    </div>
                   </div>
                   <div class="tab-meta">
                     <span v-if="tabGroupInfo(tab)" class="tab-group-chip" :title="`标签组：${tabGroupInfo(tab).title}`">
@@ -280,7 +278,7 @@
                   <div class="tab-actions">
                     <button class="btn-sm" title="重新加载" @click.stop="reloadTab(tab)">⟳</button>
                     <div class="dropdown" @click.stop>
-                      <button class="btn-sm btn-more" title="更多" aria-label="更多操作" @click="toggleMenu(`tab-${tab.id}`)">⋮</button>
+                      <button class="btn-sm btn-more" title="更多操作" aria-label="更多操作" @click="toggleMenu(`tab-${tab.id}`)">⋮</button>
                       <div class="dropdown-menu" :class="{ 'is-open': openMenuId === `tab-${tab.id}` }" @click.stop="closeMenu">
                         <button @click="pinTab(tab)">{{ tab.pinned ? '取消固定' : '固定标签页' }}</button>
                         <button @click="muteTab(tab)">{{ tab.muted ? '取消静音' : '静音标签页' }}</button>
@@ -341,7 +339,10 @@
                   <span class="tab-select-checkbox" aria-hidden="true">✓</span>
                 </button>
                 <div class="tab-body">
-                  <div class="tab-title" :title="tab.title + '\n' + tab.url">{{ tab.title }}</div>
+                  <div class="tab-title" :title="tab.title + '\n' + tab.url">
+                    <span class="tab-title-text">{{ tab.title }}</span>
+                    <span v-if="displayDomain(tab.url)" class="tab-domain">({{ displayDomain(tab.url) }})</span>
+                  </div>
                   </div>
                 <div class="tab-meta">
                     <span v-if="tabGroupInfo(tab)" class="tab-group-chip" :title="`标签组：${tabGroupInfo(tab).title}`">
@@ -357,7 +358,7 @@
                 <div class="tab-actions">
                   <button class="btn-sm" title="重新加载" @click.stop="reloadTab(tab)">⟳</button>
                   <div class="dropdown" @click.stop>
-                    <button class="btn-sm btn-more" title="更多" aria-label="更多操作" @click="toggleMenu(`tab-${tab.id}`)">⋮</button>
+                    <button class="btn-sm btn-more" title="更多操作" aria-label="更多操作" @click="toggleMenu(`tab-${tab.id}`)">⋮</button>
                     <div class="dropdown-menu" :class="{ 'is-open': openMenuId === `tab-${tab.id}` }" @click.stop="closeMenu">
                       <button @click="pinTab(tab)">{{ tab.pinned ? '取消固定' : '固定标签页' }}</button>
                       <button @click="muteTab(tab)">{{ tab.muted ? '取消静音' : '静音标签页' }}</button>
@@ -447,13 +448,15 @@
                 <span class="tab-select-checkbox" aria-hidden="true">✓</span>
               </button>
               <div class="tab-body">
-                <div class="tab-title" :title="stored.title + '\n' + stored.url" :class="{ 'tab-url-visible': true }">{{ stored.title }}</div>
-                <div class="tab-url">{{ stored.url }}</div>
+                <div class="tab-title" :title="stored.title + '\n' + stored.url">
+                  <span class="tab-title-text">{{ stored.title }}</span>
+                  <span v-if="displayDomain(stored.url)" class="tab-domain">({{ displayDomain(stored.url) }})</span>
+                </div>
               </div>
               <div class="tab-actions">
                 <button class="btn-sm" title="打开标签页" @click.stop="openSavedTab(stored)">↗</button>
                 <div class="dropdown" @click.stop>
-                  <button class="btn-sm btn-more" title="更多" aria-label="更多操作" @click="toggleMenu(`saved-${stored.id}`)">⋮</button>
+                  <button class="btn-sm btn-more" title="更多操作" aria-label="更多操作" @click="toggleMenu(`saved-${stored.id}`)">⋮</button>
                   <div class="dropdown-menu" :class="{ 'is-open': openMenuId === `saved-${stored.id}` }" @click.stop="closeMenu">
                     <button @click="openSavedTab(stored)">打开标签页</button>
                     <button @click="copyUrl(stored)">复制链接</button>
@@ -536,27 +539,27 @@
             type="button"
             :title="`关闭 ${selectedFromDefault.length} 个实时标签页`"
             @click="bulkCloseSelected"
-          >关闭 {{ selectedFromDefault.length }}</button>
+          >关闭</button>
           <button
             v-if="selectedFromCollects.length"
             class="btn-sm bulk-bar-btn danger"
             type="button"
             :title="`从收藏集移出 ${selectedFromCollects.length} 个标签`"
             @click="bulkRemoveFromCollect"
-          >移出 {{ selectedFromCollects.length }}</button>
+          >移出</button>
           <template v-if="selectedFromDefault.length">
             <button
               class="btn-sm bulk-bar-btn"
               type="button"
               :title="allPinned ? '取消固定' : '固定标签页'"
               @click="bulkPinSelected(!allPinned)"
-            >{{ allPinned ? '取消固定' : '固定' }} {{ selectedFromDefault.length }}</button>
+            >{{ allPinned ? '取消固定' : '固定' }}</button>
             <button
               class="btn-sm bulk-bar-btn"
               type="button"
               :title="allMuted ? '取消静音' : '静音标签页'"
               @click="bulkMuteSelected(!allMuted)"
-            >{{ allMuted ? '取消静音' : '静音' }} {{ selectedFromDefault.length }}</button>
+            >{{ allMuted ? '取消静音' : '静音' }}</button>
           </template>
           <NSelect
             v-if="selectedFromCollects.length && collectMoveOptions.length"
@@ -628,7 +631,9 @@ const {
   moveTabInCollect,
   dedupByUrl,
   exportCollect,
+  exportCollects,
   importCollect,
+  importCollects,
   mergeCollect,
   isDefault,
   getAvailableCollects,
@@ -845,18 +850,21 @@ const totalTabs = computed(() => {
 })
 
 const windows = computed(() => {
-  const map = {}
+  const map = new Map()
   for (const tab of displayTabs.value) {
-    if (!map[tab.windowId]) {
-      map[tab.windowId] = {
+    if (!map.has(tab.windowId)) {
+      map.set(tab.windowId, {
         windowId: tab.windowId,
-        windowName: `Window ${tab.windowId}`,
+        incognito: Boolean(tab.incognito),
         tabs: [],
-      }
+      })
     }
-    map[tab.windowId].tabs.push(tab)
+    map.get(tab.windowId).tabs.push(tab)
   }
-  return Object.values(map)
+  return [...map.values()].map((window, index) => ({
+    ...window,
+    windowName: `Window ${index + 1}`,
+  }))
 })
 
 const TAB_GROUP_COLORS = {
@@ -886,6 +894,10 @@ function tabGroupInfo(tab) {
 function tabGroupStyle(tab) {
   const group = tabGroupInfo(tab)
   return group ? { '--tab-group-color': group.color } : null
+}
+
+function displayDomain(url) {
+  return getHostname(url).replace(/^www\./i, '')
 }
 
 const savableCollects = computed(() => collects.value.filter((collect) => !isDefault(collect.id)))
@@ -1241,6 +1253,33 @@ function onExportCollect(coll) {
   }
 }
 
+function downloadJson(json, filename) {
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+function onExportCollects() {
+  try {
+    const count = collects.value.filter((collect) => !isDefault(collect.id)).length
+    if (!count) {
+      message.info('没有可导出的收藏集。')
+      return
+    }
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    downloadJson(exportCollects(), `etab-collects-${date}.json`)
+    message.success(`已导出 ${count} 个收藏集。`)
+  } catch (error) {
+    message.error(error.message || '导出失败')
+  }
+}
+
 function onMergeCollect(sourceColl) {
   closeMenu()
   const targets = collects.value.filter((c) => !isDefault(c.id) && c.id !== sourceColl.id)
@@ -1306,8 +1345,14 @@ async function onImportFile(event) {
   if (!file) return
   try {
     const text = await file.text()
-    const result = await importCollect(text)
-    message.success(`已导入收藏集「${file.name}」（新增 ${result.added}，跳过 ${result.skipped}）`)
+    const payload = JSON.parse(text)
+    if (payload?.schema === 'etab.collects/v1') {
+      const result = await importCollects(text)
+      message.success(`已导入 ${result.imported} 个收藏集（新增 ${result.added}，跳过 ${result.skipped}）。`)
+    } else {
+      const result = await importCollect(text)
+      message.success(`已导入收藏集「${file.name}」（新增 ${result.added}，跳过 ${result.skipped}）`)
+    }
   } catch (e) {
     message.error(`导入失败：${e.message || '未知错误'}`)
   }
@@ -1513,6 +1558,7 @@ function tabDragClasses(tab) {
   return {
     dragging: draggingTabId.value === tab.id,
     'is-pinned': Boolean(tab.pinned),
+    'is-incognito': Boolean(tab.incognito),
     'has-tab-group': Boolean(tabGroupInfo(tab)),
     'drag-target-before': dragOverTabId.value === tab.id && dragOverPosition.value === 'before',
     'drag-target-after': dragOverTabId.value === tab.id && dragOverPosition.value === 'after',
@@ -1831,8 +1877,15 @@ async function onDrop(collectId) {
 }
 
 .toolbar-actions {
+  flex: 1;
   display: flex;
   gap: 4px;
+}
+
+.toolbar-view-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .ai-group-button:disabled {
@@ -2104,7 +2157,8 @@ async function onDrop(collectId) {
   50% { transform: scale(1.13); box-shadow: 0 0 0 5px rgba(74, 158, 255, 0.14); }
 }
 
-.toolbar-actions .btn-ghost.active {
+.toolbar-actions .btn-ghost.active,
+.header-icon-button.active {
   background: var(--bg-hover);
   color: var(--accent);
   border-color: var(--accent);
@@ -2155,6 +2209,16 @@ async function onDrop(collectId) {
   font-size: 15px;
   font-weight: 600;
   flex: 1;
+}
+
+.window-header.is-incognito-window {
+  background: #98a7ba;
+  border-color: #7c8da2;
+  box-shadow: 0 4px 12px rgba(71, 85, 105, 0.16);
+}
+
+.window-header.is-incognito-window h2 {
+  color: #172033;
 }
 
 .window-collect-button {
@@ -2228,6 +2292,31 @@ async function onDrop(collectId) {
   min-width: 0;
 }
 
+.tab-card .tab-title {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tab-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-domain {
+  max-width: 120px;
+  flex-shrink: 1;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tab-select-control {
   position: relative;
   display: inline-flex;
@@ -2243,6 +2332,8 @@ async function onDrop(collectId) {
 }
 
 .tab-select-control .favicon {
+  width: 18px;
+  height: 18px;
   transition: opacity 0.15s ease;
 }
 
@@ -2309,21 +2400,59 @@ async function onDrop(collectId) {
 }
 
 .tab-card.is-pinned {
-  background: linear-gradient(90deg, rgba(74, 158, 255, 0.18), var(--bg-card) 42%);
-  border-color: rgba(74, 158, 255, 0.42);
-  box-shadow: inset 3px 0 0 var(--accent), var(--shadow);
+  box-shadow: inset 4px 0 0 var(--text-secondary), var(--shadow);
 }
 
 .tab-card.is-pinned.is-selected {
-  background: #f3f5f7;
-  box-shadow: inset 3px 0 0 var(--accent), 0 0 0 2px rgba(107, 122, 143, 0.16), var(--shadow);
+  box-shadow: inset 4px 0 0 var(--text-secondary), 0 0 0 2px rgba(107, 122, 143, 0.16), var(--shadow);
+}
+
+/* 无痕窗口的标签使用深色底，与普通窗口明确区分。 */
+.tab-card.is-incognito {
+  background: #adb9c9;
+  border-color: #8999ad;
+  box-shadow: 0 4px 12px rgba(71, 85, 105, 0.14);
+}
+
+.tab-card.is-incognito:hover {
+  background: #9eacbe;
+  border-color: #71849b;
+}
+
+.tab-card.is-incognito .tab-title,
+.tab-card.is-incognito .tab-actions .btn-sm {
+  color: #1f2937;
+}
+
+.tab-card.is-incognito .tab-domain,
+.tab-card.is-incognito .tab-pinned-indicator,
+.tab-card.is-incognito .tab-drag-handle {
+  color: #637083;
+}
+
+.tab-card.is-incognito.is-pinned {
+  box-shadow: inset 4px 0 0 #637083, 0 4px 12px rgba(71, 85, 105, 0.14);
+}
+
+.tab-card.is-incognito.has-tab-group {
+  box-shadow: inset 4px 0 0 var(--tab-group-color), 0 4px 12px rgba(71, 85, 105, 0.14);
+}
+
+.tab-card.is-incognito.is-pinned.has-tab-group {
+  box-shadow: inset 4px 0 0 var(--tab-group-color), inset 8px 0 0 #637083, 0 4px 12px rgba(71, 85, 105, 0.14);
+}
+
+.tab-card.is-incognito.is-selected {
+  background: #96a5b8;
+  border-color: #6f8299;
+  box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.2), 0 4px 12px rgba(71, 85, 105, 0.18);
 }
 
 .tab-pinned-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent);
+  color: var(--text-secondary);
 }
 
 .tab-pinned-indicator svg {
@@ -2394,8 +2523,7 @@ async function onDrop(collectId) {
 }
 
 /* 收藏集与标签卡的操作均为纯图标按钮；用底色提示悬停，避免边框显得生硬。 */
-.collect-actions .btn-sm,
-.tab-actions .btn-sm {
+.collect-actions .btn-sm {
   width: 28px;
   height: 28px;
   border: 0;
@@ -2403,11 +2531,28 @@ async function onDrop(collectId) {
   font-size: 16px;
 }
 
+.tab-actions .btn-sm {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 5px;
+  font-size: 18px;
+}
+
 .collect-actions .btn-sm svg,
-.tab-actions .btn-sm svg,
 .saved-tabs-actions .btn-sm svg {
   width: 16px;
   height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.tab-actions .btn-sm svg {
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
